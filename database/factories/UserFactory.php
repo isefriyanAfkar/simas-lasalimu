@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use Illuminate\Database\Eloquent\Factories\Attributes\UseModel;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -35,6 +36,22 @@ class UserFactory extends Factory
             'remember_token' => Str::random(10),
             'status_aktif' => true,
         ];
+    }
+
+    /**
+     * Give the user the super_admin role. The role must already exist.
+     */
+    public function superAdmin(): static
+    {
+        return $this->afterCreating(fn (User $user) => $user->assignRole(Peran::SuperAdmin->value));
+    }
+
+    /**
+     * Give the user the operator role. The role must already exist.
+     */
+    public function operator(): static
+    {
+        return $this->afterCreating(fn (User $user) => $user->assignRole(Peran::Operator->value));
     }
 
     /**

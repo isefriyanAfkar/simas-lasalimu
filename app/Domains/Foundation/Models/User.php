@@ -3,25 +3,30 @@
 namespace App\Domains\Foundation\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Domains\Foundation\Enums\Peran;
+use App\Domains\Foundation\Policies\UserPolicy;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
+use Spatie\Permission\Traits\HasRoles;
 
 #[Fillable(['name', 'username', 'email', 'password', 'status_aktif'])]
 #[Hidden(['password', 'remember_token'])]
 #[UseFactory(UserFactory::class)]
+#[UsePolicy(UserPolicy::class)]
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, HasRoles, Notifiable;
 
     /**
      * Normalize a username so storage and login compare the same form.
@@ -32,11 +37,16 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
-     * Only active users may enter a Filament panel.
+     * Only active users holding a panel role may enter a Filament panel.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return $this->status_aktif;
+        return $this->status_aktif && $this->hasAnyRole([Peran::SuperAdmin->value, Peran::Operator->value]);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->hasRole(Peran::SuperAdmin->value);
     }
 
     /**
