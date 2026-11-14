@@ -112,6 +112,38 @@ class ActivityLogResourceTest extends TestCase
             ->assertCanNotSeeTableRecords([$early]);
     }
 
+    public function test_date_filter_includes_entries_on_the_until_date(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create();
+
+        $this->travelTo('2026-11-12 23:00:00');
+        app(UserService::class)->deactivate($superAdmin, $operator);
+        $this->travelTo('2026-11-13 00:30:00');
+        app(UserService::class)->activate($superAdmin, $operator);
+        $this->travelBack();
+
+        $onUntilDate = Activity::query()->where('event', 'dinonaktifkan')->sole();
+        $dayAfter = Activity::query()->where('event', 'diaktifkan')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->filterTable('waktu', ['dari' => '2026-11-12', 'sampai' => '2026-11-12'])
+            ->assertCanSeeTableRecords([$onUntilDate])
+            ->assertCanNotSeeTableRecords([$dayAfter]);
+    }
+
+    public function test_date_filter_shows_active_indicators(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        Livewire::test(ListActivityLogs::class)
+            ->filterTable('waktu', ['dari' => '2026-11-05', 'sampai' => '2026-11-12'])
+            ->assertSeeText('Dari 05 Nov 2026')
+            ->assertSeeText('Sampai 12 Nov 2026');
+    }
+
     public function test_is_read_only_even_for_super_admin(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

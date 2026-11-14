@@ -22,6 +22,18 @@ use Illuminate\Support\Facades\DB;
  * the same transaction. Only the attributes in LOGGED_ATTRIBUTES (and the role
  * name) are ever written to the log, so passwords and remember tokens never
  * reach it.
+ *
+ * Password contract: the two password paths hand over different forms, and
+ * both are correct because User casts `password` as `hashed`, which hashes a
+ * plaintext value and stores an already-hashed value unchanged.
+ * - resetPassword() receives plaintext from the admin's reset form.
+ * - updateOwnProfile() receives a hash: Filament's profile password field
+ *   already applies Hash::make(), and Filament also stores that hash in the
+ *   session (password_hash_*) to keep the user signed in.
+ * Keep the `hashed` cast on User: without it resetPassword() would store
+ * plaintext. Never hash again in this service: updateOwnProfile() would then
+ * store a hash of a hash and the user could no longer log in. Both paths are
+ * covered by tests that log in with the new password.
  */
 class UserService
 {
@@ -134,6 +146,9 @@ class UserService
         });
     }
 
+    /**
+     * @param  string  $kataSandiBaru  plaintext; hashed by the model's `hashed` cast
+     */
     public function resetPassword(User $pelaku, User $user, string $kataSandiBaru): User
     {
         $this->ensureCanManage($pelaku, $user);
@@ -151,7 +166,7 @@ class UserService
      * A signed-in user changing their own name and, optionally, password.
      * Every other key (such as username) is ignored.
      *
-     * @param  array{name: string, password?: string|null}  $data
+     * @param  array{name: string, password?: string|null}  $data  password may be plaintext or an already-hashed value (see class docblock)
      */
     public function updateOwnProfile(User $user, array $data): User
     {

@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament\Resources\Users;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
+use App\Filament\Pages\Auth\Login;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
 use App\Filament\Resources\Users\Pages\ListUsers;
@@ -136,6 +137,28 @@ class UserResourceTest extends TestCase
             ->assertHasNoFormErrors();
 
         $this->assertTrue(Hash::check('kata-sandi-baru-123', $operator->fresh()->password));
+    }
+
+    public function test_user_logs_in_with_the_password_reset_by_an_admin(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $operator = User::factory()->operator()->create(['username' => 'budi']);
+
+        Livewire::test(ListUsers::class)
+            ->callAction(TestAction::make('aturUlangKataSandi')->table($operator), data: [
+                'password' => 'kata-sandi-baru-123',
+                'password_confirmation' => 'kata-sandi-baru-123',
+            ])
+            ->assertHasNoFormErrors();
+
+        Filament::auth()->logout();
+
+        Livewire::test(Login::class)
+            ->fillForm(['username' => 'budi', 'password' => 'kata-sandi-baru-123'])
+            ->call('authenticate')
+            ->assertHasNoErrors();
+
+        $this->assertAuthenticatedAs($operator);
     }
 
     public function test_operator_does_not_see_row_actions_for_a_super_admin(): void

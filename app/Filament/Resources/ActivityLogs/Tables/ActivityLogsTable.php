@@ -7,9 +7,11 @@ use App\Domains\Foundation\Models\User;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\Indicator;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Spatie\Activitylog\Models\Activity;
 
 class ActivityLogsTable
@@ -46,7 +48,22 @@ class ActivityLogsTable
                     ])
                     ->query(fn (Builder $query, array $data): Builder => $query
                         ->when($data['dari'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '>=', $date))
-                        ->when($data['sampai'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '<=', $date))),
+                        ->when($data['sampai'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '<=', $date)))
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+
+                        if ($data['dari'] ?? null) {
+                            $indicators[] = Indicator::make('Dari '.Carbon::parse($data['dari'])->translatedFormat('d M Y'))
+                                ->removeField('dari');
+                        }
+
+                        if ($data['sampai'] ?? null) {
+                            $indicators[] = Indicator::make('Sampai '.Carbon::parse($data['sampai'])->translatedFormat('d M Y'))
+                                ->removeField('sampai');
+                        }
+
+                        return $indicators;
+                    }),
                 SelectFilter::make('pelaku')
                     ->label('Pelaku')
                     ->options(fn (): array => User::query()->orderBy('name')->pluck('name', 'id')->all())

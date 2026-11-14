@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament\Pages\Auth;
 
 use App\Domains\Foundation\Models\User;
 use App\Filament\Pages\Auth\EditProfile;
+use App\Filament\Pages\Auth\Login;
 use Database\Seeders\PeranDanIzinSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -40,6 +41,30 @@ class EditProfileTest extends TestCase
 
         $this->assertTrue(Hash::check('kata-sandi-baru-123', $operator->fresh()->password));
         $this->assertSame(1, Activity::query()->where('event', 'kata_sandi_diubah_sendiri')->count());
+    }
+
+    public function test_user_logs_in_with_the_password_set_on_the_profile_page(): void
+    {
+        $operator = User::factory()->operator()->create(['username' => 'budi']);
+        $this->actingAs($operator);
+
+        Livewire::test(EditProfile::class)
+            ->fillForm([
+                'password' => 'kata-sandi-baru-123',
+                'passwordConfirmation' => 'kata-sandi-baru-123',
+                'currentPassword' => 'password',
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        Filament::auth()->logout();
+
+        Livewire::test(Login::class)
+            ->fillForm(['username' => 'budi', 'password' => 'kata-sandi-baru-123'])
+            ->call('authenticate')
+            ->assertHasNoErrors();
+
+        $this->assertAuthenticatedAs($operator);
     }
 
     public function test_rejects_password_change_with_wrong_current_password(): void
