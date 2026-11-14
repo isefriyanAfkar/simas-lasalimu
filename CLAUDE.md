@@ -146,3 +146,25 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Run `vendor/bin/phpunit` to call the test runner directly. It accepts the same file path and `--filter=testName` arguments.
 
 </laravel-boost-guidelines>
+
+## Aturan proyek SIMAS
+
+- Stack terkunci: PHP 8.4, Laravel 13, MySQL 8, Filament 5, Livewire 4, Tailwind 4,
+  PHPUnit, Pint. Jangan menambah paket tanpa persetujuan.
+- Lingkup saat ini hanya fondasi: Foundation (pengguna, role, pengaturan, audit),
+  Academic (tahun ajaran, semester, kelas, rombel, mapel, penugasan guru),
+  People (guru, siswa, wali murid). Jangan membuat tabel atau kode untuk presensi,
+  jurnal, poin, perpustakaan, atau notifikasi.
+- Struktur: app/Domains/{Foundation,Academic,People}/{Models,Services,Enums}.
+  Tampilan Filament di app/Filament. Policy di app/Policies.
+- Aturan bisnis hanya di Service. Resource, Page, dan Action Filament hanya
+  memanggil Service dan tidak berisi transaksi atau logika penulisan data.
+- Operasi yang menyentuh lebih dari satu tabel dibungkus DB::transaction di Service.
+- Hak akses lewat Policy dan Spatie Permission.
+- Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
+  peserta_didik, wali_murid, tahun_ajaran.
+- Setiap Service yang punya aturan wajib punya feature test PHPUnit.
+  Jalankan `php artisan test` dan `vendor/bin/pint --test` sebelum menyatakan selesai.
+- Skema hanya diubah lewat migration baru. Dilarang tanpa persetujuan:
+  migrate:fresh, migrate:reset, db:wipe, menghapus kolom atau tabel, mengubah .env.
+- Satu tugas, satu commit. Berhenti dan laporkan setelah setiap tugas.
