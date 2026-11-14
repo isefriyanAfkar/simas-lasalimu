@@ -160,6 +160,10 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Aturan bisnis hanya di Service. Resource, Page, dan Action Filament hanya
   memanggil Service dan tidak berisi transaksi atau logika penulisan data.
 - Operasi yang menyentuh lebih dari satu tabel dibungkus DB::transaction di Service.
+- Log aktivitas (spatie/laravel-activitylog v5): aksi bermakna, seperti aktifkan,
+  nonaktifkan, atur ulang kata sandi, atau ubah role, dicatat eksplisit di Service
+  dengan activity() di dalam transaksi yang sama. Tambah/ubah data master sederhana
+  boleh memakai trait LogsActivity. Kata sandi dan remember_token tidak boleh masuk log.
 - Hak akses lewat Policy dan Spatie Permission.
 - Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
   peserta_didik, wali_murid, tahun_ajaran.

@@ -9,8 +9,10 @@ use App\Domains\Foundation\Services\UserService;
 use Closure;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
 
 class UserServiceTest extends TestCase
@@ -182,6 +184,187 @@ class UserServiceTest extends TestCase
         $this->assertCount(0, $userWithoutRole->fresh()->roles);
     }
 
+    public function test_logs_user_creation_with_actor_and_new_values(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $user = $this->service()->create($superAdmin, [
+            'name' => 'Budi Santoso',
+            'username' => 'budi',
+            'email' => 'budi@sekolah.test',
+            'password' => 'rahasia-baru-123',
+            'peran' => Peran::Operator->value,
+        ]);
+
+        $activity = $this->latestActivity('dibuat', $superAdmin, $user);
+        $this->assertSameKeysAndValues([
+            'name' => 'Budi Santoso',
+            'username' => 'budi',
+            'email' => 'budi@sekolah.test',
+            'status_aktif' => true,
+            'peran' => 'operator',
+        ], $activity->attribute_changes['attributes']);
+    }
+
+    public function test_logs_update_with_only_the_changed_fields(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create(['name' => 'Nama Lama', 'username' => 'tetap']);
+
+        $this->service()->update($superAdmin, $operator, [
+            'name' => 'Nama Baru',
+            'username' => 'tetap',
+            'email' => $operator->email,
+            'peran' => Peran::Operator->value,
+        ]);
+
+        $activity = $this->latestActivity('diubah', $superAdmin, $operator);
+        $this->assertSame(['name' => 'Nama Baru'], $activity->attribute_changes['attributes']);
+        $this->assertSame(['name' => 'Nama Lama'], $activity->attribute_changes['old']);
+        $this->assertSame(0, Activity::query()->where('event', 'role_berubah')->count());
+    }
+
+    public function test_does_not_log_an_update_that_changes_nothing(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create();
+
+        $this->service()->update($superAdmin, $operator, $this->updateData($operator, Peran::Operator));
+
+        $this->assertSame(0, Activity::query()->whereIn('event', ['diubah', 'role_berubah'])->count());
+    }
+
+    public function test_logs_role_change_as_its_own_entry(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create();
+
+        $this->service()->update($superAdmin, $operator, $this->updateData($operator, Peran::SuperAdmin));
+
+        $activity = $this->latestActivity('role_berubah', $superAdmin, $operator);
+        $this->assertSame(['peran' => 'super_admin'], $activity->attribute_changes['attributes']);
+        $this->assertSame(['peran' => 'operator'], $activity->attribute_changes['old']);
+        $this->assertSame(0, Activity::query()->where('event', 'diubah')->count());
+    }
+
+    public function test_logs_activation(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->nonaktif()->create();
+
+        $this->service()->activate($superAdmin, $operator);
+
+        $activity = $this->latestActivity('diaktifkan', $superAdmin, $operator);
+        $this->assertSame(['status_aktif' => true], $activity->attribute_changes['attributes']);
+        $this->assertSame(['status_aktif' => false], $activity->attribute_changes['old']);
+    }
+
+    public function test_logs_deactivation(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create();
+
+        $this->service()->deactivate($superAdmin, $operator);
+
+        $activity = $this->latestActivity('dinonaktifkan', $superAdmin, $operator);
+        $this->assertSame(['status_aktif' => false], $activity->attribute_changes['attributes']);
+        $this->assertSame(['status_aktif' => true], $activity->attribute_changes['old']);
+    }
+
+    public function test_logs_password_reset_without_any_changes(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create();
+
+        $this->service()->resetPassword($superAdmin, $operator, 'kata-sandi-baru-123');
+
+        $activity = $this->latestActivity('kata_sandi_diatur_ulang', $superAdmin, $operator);
+        $this->assertCount(0, $activity->attribute_changes ?? []);
+    }
+
+    public function test_rejected_operation_leaves_no_log(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->assertRejected(
+            PelanggaranAturanPengguna::superAdminAktifTerakhir(),
+            fn () => $this->service()->deactivate($superAdmin, $superAdmin),
+        );
+
+        $this->assertSame(0, Activity::query()->count());
+    }
+
+    public function test_user_changes_own_name_and_it_is_logged(): void
+    {
+        $operator = User::factory()->operator()->create(['name' => 'Nama Lama']);
+
+        $this->service()->updateOwnProfile($operator, ['name' => 'Nama Baru', 'password' => null]);
+
+        $this->assertSame('Nama Baru', $operator->fresh()->name);
+        $activity = $this->latestActivity('profil_diubah', $operator, $operator);
+        $this->assertSame(['name' => 'Nama Baru'], $activity->attribute_changes['attributes']);
+        $this->assertSame(['name' => 'Nama Lama'], $activity->attribute_changes['old']);
+    }
+
+    public function test_user_changes_own_password_and_it_is_logged(): void
+    {
+        $operator = User::factory()->operator()->create();
+
+        $this->service()->updateOwnProfile($operator, ['name' => $operator->name, 'password' => 'kata-sandi-baru-123']);
+
+        $this->assertTrue(Hash::check('kata-sandi-baru-123', $operator->fresh()->password));
+        $this->latestActivity('kata_sandi_diubah_sendiri', $operator, $operator);
+        $this->assertSame(0, Activity::query()->where('event', 'profil_diubah')->count());
+    }
+
+    public function test_own_profile_update_ignores_username(): void
+    {
+        $operator = User::factory()->operator()->create(['username' => 'asli']);
+
+        $this->service()->updateOwnProfile($operator, ['name' => $operator->name, 'username' => 'palsu', 'password' => null]);
+
+        $this->assertSame('asli', $operator->fresh()->username);
+    }
+
+    public function test_no_log_entry_contains_a_password_or_remember_token(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = $this->service()->create($superAdmin, [
+            'name' => 'Budi Santoso',
+            'username' => 'budi',
+            'password' => 'sandi-awal-12345',
+            'peran' => Peran::Operator->value,
+        ]);
+
+        $this->service()->update($superAdmin, $user, ['name' => 'Budi S', 'username' => 'budi', 'email' => null, 'peran' => Peran::SuperAdmin->value]);
+        $this->service()->resetPassword($superAdmin, $user, 'sandi-reset-12345');
+        $this->service()->deactivate($superAdmin, $user);
+        $this->service()->activate($superAdmin, $user);
+        $this->service()->updateOwnProfile($user->fresh(), ['name' => 'Budi Santoso', 'password' => 'sandi-sendiri-12345']);
+
+        $user = $user->fresh();
+        $rows = DB::table('activity_log')->get();
+        $this->assertCount(8, $rows);
+
+        $forbiddenStrings = array_filter([
+            'sandi-awal-12345',
+            'sandi-reset-12345',
+            'sandi-sendiri-12345',
+            $user->getAuthPassword(),
+            $user->getRememberToken(),
+            '"password"',
+            'remember_token',
+        ], fn (?string $value): bool => filled($value));
+
+        foreach ($rows as $row) {
+            $raw = json_encode($row);
+
+            foreach ($forbiddenStrings as $forbidden) {
+                $this->assertStringNotContainsString($forbidden, $raw);
+            }
+        }
+    }
+
     /**
      * @return array<string, array{string}>
      */
@@ -251,6 +434,32 @@ class UserServiceTest extends TestCase
             'password' => $user->getAuthPassword(),
             'roles' => $user->getRoleNames()->all(),
         ];
+    }
+
+    /**
+     * Strict comparison that ignores key order (MySQL JSON reorders keys).
+     *
+     * @param  array<string, mixed>  $expected
+     * @param  array<string, mixed>  $actual
+     */
+    private function assertSameKeysAndValues(array $expected, array $actual): void
+    {
+        ksort($expected);
+        ksort($actual);
+
+        $this->assertSame($expected, $actual);
+    }
+
+    private function latestActivity(string $event, User $pelaku, User $subjek): Activity
+    {
+        $activity = Activity::query()->where('event', $event)->latest('id')->first();
+
+        $this->assertNotNull($activity, "No activity logged for event [{$event}].");
+        $this->assertSame('pengguna', $activity->log_name);
+        $this->assertTrue($activity->causer->is($pelaku), 'Wrong causer.');
+        $this->assertTrue($activity->subject->is($subjek), 'Wrong subject.');
+
+        return $activity;
     }
 
     private function assertRejected(PelanggaranAturanPengguna $expected, Closure $operation): void

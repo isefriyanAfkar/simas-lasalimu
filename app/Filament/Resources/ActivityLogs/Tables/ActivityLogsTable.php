@@ -1,0 +1,110 @@
+<?php
+
+namespace App\Filament\Resources\ActivityLogs\Tables;
+
+use App\Domains\Foundation\Enums\AksiPengguna;
+use App\Domains\Foundation\Models\User;
+use Filament\Forms\Components\DatePicker;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Spatie\Activitylog\Models\Activity;
+
+class ActivityLogsTable
+{
+    public static function configure(Table $table): Table
+    {
+        return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['causer', 'subject']))
+            ->defaultSort('created_at', 'desc')
+            ->columns([
+                TextColumn::make('created_at')
+                    ->label('Waktu')
+                    ->dateTime('d M Y H:i')
+                    ->sortable(),
+                TextColumn::make('causer.name')
+                    ->label('Pelaku')
+                    ->default('Sistem'),
+                TextColumn::make('event')
+                    ->label('Aksi')
+                    ->formatStateUsing(fn (?string $state, Activity $record): string => AksiPengguna::tryFrom((string) $state)?->label() ?? $record->description),
+                TextColumn::make('objek')
+                    ->label('Objek')
+                    ->state(fn (Activity $record): ?string => self::describeSubject($record)),
+                TextColumn::make('rincian')
+                    ->label('Rincian perubahan')
+                    ->state(fn (Activity $record): ?string => self::describeChanges($record))
+                    ->wrap(),
+            ])
+            ->filters([
+                Filter::make('waktu')
+                    ->schema([
+                        DatePicker::make('dari')->label('Dari tanggal'),
+                        DatePicker::make('sampai')->label('Sampai tanggal'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => $query
+                        ->when($data['dari'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '>=', $date))
+                        ->when($data['sampai'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('created_at', '<=', $date))),
+                SelectFilter::make('pelaku')
+                    ->label('Pelaku')
+                    ->options(fn (): array => User::query()->orderBy('name')->pluck('name', 'id')->all())
+                    ->searchable()
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        $data['value'] ?? null,
+                        fn (Builder $query, int|string $userId): Builder => $query
+                            ->where('causer_type', (new User)->getMorphClass())
+                            ->where('causer_id', $userId),
+                    )),
+            ]);
+    }
+
+    private static function describeSubject(Activity $activity): ?string
+    {
+        $subject = $activity->subject;
+
+        if ($subject instanceof User) {
+            return $subject->username;
+        }
+
+        if ($activity->subject_type === null) {
+            return null;
+        }
+
+        return class_basename($activity->subject_type).' #'.$activity->subject_id;
+    }
+
+    /**
+     * "field: old → new" per changed attribute, or "field: value" when there is no old value.
+     */
+    private static function describeChanges(Activity $activity): ?string
+    {
+        $new = $activity->attribute_changes['attributes'] ?? [];
+        $old = $activity->attribute_changes['old'] ?? [];
+
+        if ($new === []) {
+            return null;
+        }
+
+        $parts = [];
+
+        foreach ($new as $attribute => $value) {
+            $parts[] = array_key_exists($attribute, $old)
+                ? sprintf('%s: %s → %s', $attribute, self::formatValue($attribute, $old[$attribute]), self::formatValue($attribute, $value))
+                : sprintf('%s: %s', $attribute, self::formatValue($attribute, $value));
+        }
+
+        return implode('; ', $parts);
+    }
+
+    private static function formatValue(string $attribute, mixed $value): string
+    {
+        return match (true) {
+            $value === null => '—',
+            $attribute === 'status_aktif' => $value ? 'aktif' : 'nonaktif',
+            is_bool($value) => $value ? 'ya' : 'tidak',
+            default => (string) $value,
+        };
+    }
+}

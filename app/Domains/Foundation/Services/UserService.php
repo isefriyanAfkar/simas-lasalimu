@@ -2,6 +2,7 @@
 
 namespace App\Domains\Foundation\Services;
 
+use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -16,9 +17,21 @@ use Illuminate\Support\Facades\DB;
  * - a non super_admin cannot change, (de)activate or reset the password of a
  *   super_admin or of another operator
  * - a non super_admin cannot grant the super_admin or operator role
+ *
+ * Every successful write is recorded in the activity log (log "pengguna") in
+ * the same transaction. Only the attributes in LOGGED_ATTRIBUTES (and the role
+ * name) are ever written to the log, so passwords and remember tokens never
+ * reach it.
  */
 class UserService
 {
+    private const string LOG_NAME = 'pengguna';
+
+    /**
+     * @var list<string>
+     */
+    private const array LOGGED_ATTRIBUTES = ['name', 'username', 'email', 'status_aktif'];
+
     /**
      * @param  array{name: string, username: string, email?: string|null, password: string, peran: string}  $data
      */
@@ -28,7 +41,7 @@ class UserService
 
         $this->ensureCanGrantRole($pelaku, $peran);
 
-        return DB::transaction(function () use ($data, $peran): User {
+        return DB::transaction(function () use ($pelaku, $data, $peran): User {
             $user = User::create([
                 'name' => $data['name'],
                 'username' => $data['username'],
@@ -38,6 +51,10 @@ class UserService
             ]);
 
             $user->syncRoles([$peran->value]);
+
+            $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
+                'attributes' => [...$user->only(self::LOGGED_ATTRIBUTES), 'peran' => $peran->value],
+            ]);
 
             return $user;
         });
@@ -56,10 +73,13 @@ class UserService
             $this->ensureCanGrantRole($pelaku, $peran);
         }
 
-        return DB::transaction(function () use ($user, $data, $peran): User {
+        return DB::transaction(function () use ($pelaku, $user, $data, $peran): User {
             if ($peran !== Peran::SuperAdmin) {
                 $this->ensureNotLastActiveSuperAdmin($user);
             }
+
+            $before = $user->only(self::LOGGED_ATTRIBUTES);
+            $roleBefore = $user->getRoleNames()->first();
 
             $user->update([
                 'name' => $data['name'],
@@ -69,6 +89,19 @@ class UserService
 
             $user->syncRoles([$peran->value]);
 
+            $changes = $this->diff($before, $user->only(self::LOGGED_ATTRIBUTES));
+
+            if ($changes !== null) {
+                $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
+            }
+
+            if ($roleBefore !== $peran->value) {
+                $this->log(AksiPengguna::RoleBerubah, $pelaku, $user, [
+                    'attributes' => ['peran' => $peran->value],
+                    'old' => ['peran' => $roleBefore],
+                ]);
+            }
+
             return $user;
         });
     }
@@ -77,9 +110,11 @@ class UserService
     {
         $this->ensureCanManage($pelaku, $user);
 
-        $user->update(['status_aktif' => true]);
+        return DB::transaction(function () use ($pelaku, $user): User {
+            $this->changeStatus($pelaku, $user, true);
 
-        return $user;
+            return $user;
+        });
     }
 
     public function deactivate(User $pelaku, User $user): User
@@ -93,7 +128,7 @@ class UserService
                 throw PelanggaranAturanPengguna::menonaktifkanDiriSendiri();
             }
 
-            $user->update(['status_aktif' => false]);
+            $this->changeStatus($pelaku, $user, false);
 
             return $user;
         });
@@ -103,9 +138,42 @@ class UserService
     {
         $this->ensureCanManage($pelaku, $user);
 
-        $user->update(['password' => $kataSandiBaru]);
+        return DB::transaction(function () use ($pelaku, $user, $kataSandiBaru): User {
+            $user->update(['password' => $kataSandiBaru]);
 
-        return $user;
+            $this->log(AksiPengguna::KataSandiDiaturUlang, $pelaku, $user);
+
+            return $user;
+        });
+    }
+
+    /**
+     * A signed-in user changing their own name and, optionally, password.
+     * Every other key (such as username) is ignored.
+     *
+     * @param  array{name: string, password?: string|null}  $data
+     */
+    public function updateOwnProfile(User $user, array $data): User
+    {
+        return DB::transaction(function () use ($user, $data): User {
+            $before = $user->only(['name']);
+
+            $user->update(['name' => $data['name']]);
+
+            $changes = $this->diff($before, $user->only(['name']));
+
+            if ($changes !== null) {
+                $this->log(AksiPengguna::ProfilDiubah, $user, $user, $changes);
+            }
+
+            if (filled($data['password'] ?? null)) {
+                $user->update(['password' => $data['password']]);
+
+                $this->log(AksiPengguna::KataSandiDiubahSendiri, $user, $user);
+            }
+
+            return $user;
+        });
     }
 
     /**
@@ -140,6 +208,60 @@ class UserService
             fn (string $value): bool => $this->canGrantRole($pelaku, Peran::from($value)),
             ARRAY_FILTER_USE_KEY,
         );
+    }
+
+    private function changeStatus(User $pelaku, User $user, bool $statusAktif): void
+    {
+        if ($user->status_aktif === $statusAktif) {
+            return;
+        }
+
+        $user->update(['status_aktif' => $statusAktif]);
+
+        $this->log($statusAktif ? AksiPengguna::Diaktifkan : AksiPengguna::Dinonaktifkan, $pelaku, $user, [
+            'attributes' => ['status_aktif' => $statusAktif],
+            'old' => ['status_aktif' => ! $statusAktif],
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array{attributes: array<string, mixed>, old: array<string, mixed>}|null
+     */
+    private function diff(array $before, array $after): ?array
+    {
+        $changed = array_filter(
+            $after,
+            fn (mixed $value, string $key): bool => $value !== $before[$key],
+            ARRAY_FILTER_USE_BOTH,
+        );
+
+        if ($changed === []) {
+            return null;
+        }
+
+        return [
+            'attributes' => $changed,
+            'old' => array_intersect_key($before, $changed),
+        ];
+    }
+
+    /**
+     * @param  array{attributes: array<string, mixed>, old?: array<string, mixed>}|null  $changes
+     */
+    private function log(AksiPengguna $aksi, User $pelaku, User $user, ?array $changes = null): void
+    {
+        $logger = activity(self::LOG_NAME)
+            ->causedBy($pelaku)
+            ->performedOn($user)
+            ->event($aksi->value);
+
+        if ($changes !== null) {
+            $logger->withChanges($changes);
+        }
+
+        $logger->log($aksi->label());
     }
 
     private function ensureCanManage(User $pelaku, User $user): void
