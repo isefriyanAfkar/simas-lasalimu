@@ -9,6 +9,7 @@ use App\Filament\Resources\Users\UserResource;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
+use Filament\Support\Exceptions\Halt;
 use Illuminate\Database\Eloquent\Model;
 
 class CreateUser extends CreateRecord
@@ -28,7 +29,7 @@ class CreateUser extends CreateRecord
         } catch (PelanggaranAturanPengguna $exception) {
             Notification::make()->danger()->title($exception->getMessage())->send();
 
-            $this->halt();
+            throw (new Halt)->rollBackDatabaseTransaction();
         }
     }
 }

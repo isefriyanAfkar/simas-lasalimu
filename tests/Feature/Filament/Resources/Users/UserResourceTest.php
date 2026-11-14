@@ -82,6 +82,21 @@ class UserResourceTest extends TestCase
         $this->assertTrue($user->status_aktif);
     }
 
+    public function test_edit_form_shows_rule_violation_and_keeps_the_record_unchanged(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create(['name' => 'Nama Lama']);
+        $this->actingAs($superAdmin);
+
+        Livewire::test(EditUser::class, ['record' => $superAdmin->getRouteKey()])
+            ->fillForm(['name' => 'Nama Baru', 'peran' => Peran::Operator->value])
+            ->call('save')
+            ->assertNotified(PelanggaranAturanPengguna::superAdminAktifTerakhir()->getMessage());
+
+        $superAdmin = $superAdmin->fresh();
+        $this->assertSame('Nama Lama', $superAdmin->name);
+        $this->assertTrue($superAdmin->hasRole(Peran::SuperAdmin->value));
+    }
+
     public function test_deactivate_action_deactivates_the_user(): void
     {
         $this->actingAs(User::factory()->superAdmin()->create());

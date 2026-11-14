@@ -168,7 +168,9 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
   peserta_didik, wali_murid, tahun_ajaran.
 - Setiap Service yang punya aturan wajib punya feature test PHPUnit.
-  Jalankan `php artisan test` dan `vendor/bin/pint --test` sebelum menyatakan selesai.
+  Jalankan `php artisan test`, `vendor/bin/pint --test`, dan
+  `vendor/bin/phpstan analyse --memory-limit=1G` (Larastan level 5, app/ dan database/)
+  sebelum menyatakan selesai.
 - Skema hanya diubah lewat migration baru. Dilarang tanpa persetujuan:
   migrate:fresh, migrate:reset, db:wipe, menghapus kolom atau tabel, mengubah .env.
 - Satu tugas, satu commit. Berhenti dan laporkan setelah setiap tugas.

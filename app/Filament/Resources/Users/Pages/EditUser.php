@@ -9,6 +9,7 @@ use App\Filament\Resources\Users\UserResource;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Support\Exceptions\Halt;
 use Illuminate\Database\Eloquent\Model;
 
 class EditUser extends EditRecord
@@ -24,7 +25,7 @@ class EditUser extends EditRecord
         /** @var User $record */
         $record = $this->getRecord();
 
-        $data['peran'] = $record->roles->first()?->name;
+        $data['peran'] = $record->getRoleNames()->first();
 
         return $data;
     }
@@ -43,7 +44,7 @@ class EditUser extends EditRecord
         } catch (PelanggaranAturanPengguna $exception) {
             Notification::make()->danger()->title($exception->getMessage())->send();
 
-            $this->halt();
+            throw (new Halt)->rollBackDatabaseTransaction();
         }
     }
 }
