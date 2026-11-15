@@ -156,6 +156,8 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
   People (guru, siswa, wali murid). Jangan membuat tabel atau kode untuk presensi,
   jurnal, poin, perpustakaan, atau notifikasi.
 - Struktur: app/Domains/{Foundation,Academic,People}/{Models,Services,Enums}.
+  Kelas pengaturan (spatie/laravel-settings) di app/Domains/Foundation/Settings;
+  settings migration di database/settings.
   Tampilan Filament di app/Filament. Policy di app/Domains/{Domain}/Policies.
 - Aturan bisnis hanya di Service. Resource, Page, dan Action Filament hanya
   memanggil Service dan tidak berisi transaksi atau logika penulisan data.

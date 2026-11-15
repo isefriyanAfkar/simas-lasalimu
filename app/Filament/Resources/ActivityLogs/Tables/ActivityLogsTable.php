@@ -85,6 +85,10 @@ class ActivityLogsTable
             return $subject->username;
         }
 
+        if ($activity->log_name === 'pengaturan') {
+            return 'Pengaturan sekolah';
+        }
+
         if ($activity->subject_type === null) {
             return null;
         }

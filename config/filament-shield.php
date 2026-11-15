@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use App\Domains\Foundation\Models\User;
+use App\Filament\Pages\KelolaPengaturanSekolah;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\Users\UserResource;
 use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
@@ -219,6 +220,7 @@ return [
         'prefix' => 'view',
         'exclude' => [
             Dashboard::class,
+            KelolaPengaturanSekolah::class,
         ],
     ],
 

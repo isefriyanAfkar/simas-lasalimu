@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Filament\Pages\Auth\EditProfile;
 use App\Filament\Pages\Auth\Login;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -32,6 +33,9 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login(Login::class)
             ->profile(EditProfile::class)
+            ->brandName(fn (): ?string => app(PengaturanSekolahService::class)->namaPanel())
+            ->brandLogo(fn (): ?string => app(PengaturanSekolahService::class)->urlLogo())
+            ->brandLogoHeight('2.5rem')
             ->colors([
                 'primary' => Color::Amber,
             ])

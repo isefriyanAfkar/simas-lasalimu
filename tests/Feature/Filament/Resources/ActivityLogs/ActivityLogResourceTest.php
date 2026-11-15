@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament\Resources\ActivityLogs;
 
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Domains\Foundation\Services\UserService;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
@@ -59,6 +60,20 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnFormattedStateSet('event', 'Pengguna dinonaktifkan', $activity)
             ->assertTableColumnStateSet('objek', 'siti', $activity)
             ->assertTableColumnStateSet('rincian', 'status_aktif: aktif → nonaktif', $activity);
+    }
+
+    public function test_school_settings_change_shows_its_object_action_and_changes(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        app(PengaturanSekolahService::class)->simpan($superAdmin, ['nama_sekolah' => 'SMA Negeri 1 Lasalimu']);
+        $activity = Activity::query()->where('log_name', 'pengaturan')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'Pengaturan sekolah', $activity)
+            ->assertTableColumnFormattedStateSet('event', 'Pengaturan sekolah diubah', $activity)
+            ->assertTableColumnStateSet('rincian', 'nama_sekolah: — → SMA Negeri 1 Lasalimu', $activity);
     }
 
     public function test_entry_without_actor_is_shown_as_sistem(): void
