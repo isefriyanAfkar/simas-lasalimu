@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\ActivityLogs\Tables;
 
+use App\Domains\Academic\Models\Semester;
+use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Models\User;
 use Filament\Forms\Components\DatePicker;
@@ -11,6 +13,8 @@ use Filament\Tables\Filters\Indicator;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Carbon;
 use Spatie\Activitylog\Models\Activity;
 
@@ -19,7 +23,14 @@ class ActivityLogsTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['causer', 'subject']))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
+                'causer',
+                'subject' => function (Relation $relation): void {
+                    if ($relation instanceof MorphTo) {
+                        $relation->morphWith([Semester::class => ['tahunAjaran']]);
+                    }
+                },
+            ]))
             ->defaultSort('created_at', 'desc')
             ->columns([
                 TextColumn::make('created_at')
@@ -83,6 +94,14 @@ class ActivityLogsTable
 
         if ($subject instanceof User) {
             return $subject->username;
+        }
+
+        if ($subject instanceof TahunAjaran) {
+            return "TA {$subject->nama}";
+        }
+
+        if ($subject instanceof Semester) {
+            return "{$subject->jenis->label()} {$subject->tahunAjaran->nama}";
         }
 
         if ($activity->log_name === 'pengaturan') {

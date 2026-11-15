@@ -9,8 +9,9 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
- * Creates the panel roles and the User permissions. Safe to run repeatedly.
- * The operator role deliberately receives no User permission for now.
+ * Creates the panel roles and their permissions. Safe to run repeatedly.
+ * The operator role deliberately receives no User permission for now, and
+ * every TahunAjaran permission except Delete.
  */
 class PeranDanIzinSeeder extends Seeder
 {
@@ -26,6 +27,30 @@ class PeranDanIzinSeeder extends Seeder
         'Update:User',
     ];
 
+    /**
+     * @var list<string>
+     */
+    public const array TAHUN_AJARAN_PERMISSIONS = [
+        'ViewAny:TahunAjaran',
+        'View:TahunAjaran',
+        'Create:TahunAjaran',
+        'Update:TahunAjaran',
+        'Delete:TahunAjaran',
+    ];
+
+    /**
+     * Permissions the operator role holds. Deleting a school year is left to
+     * the super_admin.
+     *
+     * @var list<string>
+     */
+    public const array OPERATOR_PERMISSIONS = [
+        'ViewAny:TahunAjaran',
+        'View:TahunAjaran',
+        'Create:TahunAjaran',
+        'Update:TahunAjaran',
+    ];
+
     public function run(): void
     {
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -34,9 +59,11 @@ class PeranDanIzinSeeder extends Seeder
             Role::findOrCreate($peran->value, 'web');
         }
 
-        foreach (self::USER_PERMISSIONS as $permission) {
+        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
+
+        Role::findByName(Peran::Operator->value, 'web')->givePermissionTo(self::OPERATOR_PERMISSIONS);
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
     }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament\Resources\ActivityLogs;
 
+use App\Domains\Academic\Services\TahunAjaranService;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Domains\Foundation\Services\UserService;
@@ -74,6 +75,26 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnStateSet('objek', 'Pengaturan sekolah', $activity)
             ->assertTableColumnFormattedStateSet('event', 'Pengaturan sekolah diubah', $activity)
             ->assertTableColumnStateSet('rincian', 'nama_sekolah: — → SMA Negeri 1 Lasalimu', $activity);
+    }
+
+    public function test_school_year_and_semester_entries_name_their_object(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->actingAs($superAdmin);
+        $this->travelTo('2026-09-15');
+        $tahunAjaran = app(TahunAjaranService::class)->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26']);
+        app(TahunAjaranService::class)->activate($superAdmin, $tahunAjaran);
+
+        $tahunAjaranLog = Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->sole();
+        $semesterLog = Activity::query()->where('event', 'semester_diaktifkan')->sole();
+        $createdLog = Activity::query()->where('event', 'created')->where('subject_type', $tahunAjaran->getMorphClass())->sole();
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'TA 2026/2027', $tahunAjaranLog)
+            ->assertTableColumnFormattedStateSet('event', 'Tahun ajaran diaktifkan', $tahunAjaranLog)
+            ->assertTableColumnStateSet('objek', 'Ganjil 2026/2027', $semesterLog)
+            ->assertTableColumnStateSet('causer.name', $superAdmin->name, $createdLog)
+            ->assertTableColumnFormattedStateSet('event', 'Tahun ajaran dibuat', $createdLog);
     }
 
     public function test_entry_without_actor_is_shown_as_sistem(): void

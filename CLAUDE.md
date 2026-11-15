@@ -169,6 +169,11 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Path file yang datang dari form selalu divalidasi di Service: path harus berada
   di folder yang diharapkan dan filenya ada di disk. Service hanya menghapus file
   di folder miliknya sendiri.
+- Tahun ajaran dan semester aktif selalu dibaca lewat
+  App\Domains\Academic\Services\PeriodeAkademik (tahunAjaranAktif, semesterAktif,
+  dan varian AtauGagal), jangan query status_aktif sendiri.
+- Tabel yang kelak merujuk tahun_ajaran atau semester memakai restrictOnDelete,
+  supaya tahun ajaran yang sudah dipakai tidak bisa terhapus.
 - Hak akses lewat Policy dan Spatie Permission.
 - Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
   peserta_didik, wali_murid, tahun_ajaran.
