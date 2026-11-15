@@ -9,9 +9,11 @@ use App\Domains\Foundation\Settings\PengaturanSekolah;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
 
@@ -170,6 +172,80 @@ class PengaturanSekolahServiceTest extends TestCase
         $this->assertSame('logo-sekolah/lama.png', $this->freshSettings()->logo);
     }
 
+    public function test_keeps_the_logo_when_it_is_not_changed(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('logo-sekolah/logo.png', 'logo');
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => 'logo-sekolah/logo.png']);
+
+        $this->service()->simpan($superAdmin, [...$this->validData(), 'alamat' => 'Jl. Baru No. 2', 'logo' => 'logo-sekolah/logo.png']);
+
+        Storage::disk('public')->assertExists('logo-sekolah/logo.png');
+        $this->assertSame('logo-sekolah/logo.png', $this->freshSettings()->logo);
+    }
+
+    /**
+     * The old file may only go once the change is committed: if the
+     * surrounding transaction rolls back after the service returns, the
+     * current logo must still be on disk.
+     */
+    public function test_deletes_the_old_logo_only_after_the_transaction_commits(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('logo-sekolah/lama.png', 'lama');
+        Storage::disk('public')->put('logo-sekolah/baru.png', 'baru');
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => 'logo-sekolah/lama.png']);
+
+        try {
+            DB::transaction(function () use ($superAdmin): void {
+                $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => 'logo-sekolah/baru.png']);
+
+                Storage::disk('public')->assertExists('logo-sekolah/lama.png');
+
+                throw new RuntimeException('dibatalkan sebelum commit');
+            });
+        } catch (RuntimeException $exception) {
+            $this->assertSame('dibatalkan sebelum commit', $exception->getMessage());
+        }
+
+        Storage::disk('public')->assertExists('logo-sekolah/lama.png');
+        $this->assertSame('logo-sekolah/lama.png', $this->freshSettings()->logo);
+    }
+
+    #[DataProvider('foreignLogoPaths')]
+    public function test_rejects_a_logo_path_outside_the_logo_folder_or_missing_from_disk(string $path): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('lain/rahasia.pdf', 'rahasia');
+        Storage::disk('public')->put('logo-sekolah/lama.png', 'lama');
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => 'logo-sekolah/lama.png']);
+
+        $this->assertValidationError('logo', fn () => $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => $path]));
+
+        $this->assertSame('logo-sekolah/lama.png', $this->freshSettings()->logo);
+        Storage::disk('public')->assertExists('lain/rahasia.pdf');
+        Storage::disk('public')->assertExists('logo-sekolah/lama.png');
+    }
+
+    public function test_never_deletes_an_old_logo_that_lies_outside_the_logo_folder(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('lain/rahasia.pdf', 'rahasia');
+        $settings = $this->freshSettings();
+        $settings->nama_sekolah = 'SMA Negeri 1 Lasalimu';
+        $settings->logo = 'lain/rahasia.pdf';
+        $settings->save();
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => null]);
+
+        Storage::disk('public')->assertExists('lain/rahasia.pdf');
+        $this->assertNull($this->freshSettings()->logo);
+    }
+
     public function test_panel_name_is_null_before_the_settings_are_first_saved(): void
     {
         $this->assertNull($this->service()->namaPanel());
@@ -178,6 +254,7 @@ class PengaturanSekolahServiceTest extends TestCase
     public function test_panel_name_and_logo_follow_the_saved_settings(): void
     {
         Storage::fake('public');
+        Storage::disk('public')->put('logo-sekolah/logo.png', 'logo');
         $superAdmin = User::factory()->superAdmin()->create();
         $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => 'logo-sekolah/logo.png']);
 
@@ -191,6 +268,18 @@ class PengaturanSekolahServiceTest extends TestCase
 
         $this->assertNull($this->service()->namaPanel());
         $this->assertNull($this->service()->urlLogo());
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function foreignLogoPaths(): array
+    {
+        return [
+            'file lain di disk public' => ['lain/rahasia.pdf'],
+            'keluar folder dengan ..' => ['logo-sekolah/../lain/rahasia.pdf'],
+            'di folder logo tapi tidak ada' => ['logo-sekolah/tidak-ada.png'],
+        ];
     }
 
     /**

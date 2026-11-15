@@ -166,6 +166,9 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
   nonaktifkan, atur ulang kata sandi, atau ubah role, dicatat eksplisit di Service
   dengan activity() di dalam transaksi yang sama. Tambah/ubah data master sederhana
   boleh memakai trait LogsActivity. Kata sandi dan remember_token tidak boleh masuk log.
+- Path file yang datang dari form selalu divalidasi di Service: path harus berada
+  di folder yang diharapkan dan filenya ada di disk. Service hanya menghapus file
+  di folder miliknya sendiri.
 - Hak akses lewat Policy dan Spatie Permission.
 - Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
   peserta_didik, wali_murid, tahun_ajaran.

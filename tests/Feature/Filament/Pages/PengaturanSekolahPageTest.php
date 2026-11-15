@@ -53,6 +53,60 @@ class PengaturanSekolahPageTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_operator_cannot_mount_the_page_to_call_save(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+
+        Livewire::test(KelolaPengaturanSekolah::class)->assertForbidden();
+
+        $this->assertSame(0, Activity::query()->count());
+    }
+
+    public function test_saving_reloads_the_page_so_the_new_brand_shows(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        Livewire::test(KelolaPengaturanSekolah::class)
+            ->fillForm(['nama_sekolah' => 'SMA Negeri 1 Lasalimu'])
+            ->call('save')
+            ->assertRedirect(KelolaPengaturanSekolah::getUrl());
+    }
+
+    public function test_saving_another_field_keeps_the_current_logo(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('logo-sekolah/logo.png', 'logo');
+        $superAdmin = User::factory()->superAdmin()->create();
+        app(PengaturanSekolahService::class)->simpan($superAdmin, ['nama_sekolah' => 'SMA Negeri 1 Lasalimu', 'logo' => 'logo-sekolah/logo.png']);
+        $this->actingAs($superAdmin);
+
+        Livewire::test(KelolaPengaturanSekolah::class)
+            ->fillForm(['alamat' => 'Jl. Baru No. 2'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        Storage::disk('public')->assertExists('logo-sekolah/logo.png');
+        app()->forgetInstance(PengaturanSekolah::class);
+        $this->assertSame('logo-sekolah/logo.png', app(PengaturanSekolah::class)->logo);
+    }
+
+    public function test_tampered_logo_path_is_rejected_and_no_file_is_deleted(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('lain/rahasia.pdf', 'rahasia');
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        Livewire::test(KelolaPengaturanSekolah::class)
+            ->set('data.nama_sekolah', 'SMA Negeri 1 Lasalimu')
+            ->set('data.logo', ['palsu' => 'lain/rahasia.pdf'])
+            ->call('save')
+            ->assertHasFormErrors(['logo']);
+
+        app()->forgetInstance(PengaturanSekolah::class);
+        $this->assertNull(app(PengaturanSekolah::class)->logo);
+        Storage::disk('public')->assertExists('lain/rahasia.pdf');
+    }
+
     public function test_saving_the_form_stores_the_settings_and_logs_the_change(): void
     {
         $this->actingAs(User::factory()->superAdmin()->create());

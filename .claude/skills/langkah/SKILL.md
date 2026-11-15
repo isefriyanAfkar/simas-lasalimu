@@ -85,6 +85,9 @@ Urutannya:
   Tulis test lebih dulu, jalankan sampai gagal karena alasan yang benar, lalu
   tulis kode secukupnya sampai lolos. Nilai yang diharapkan ditulis sebagai
   literal, bukan dihitung dengan kode yang sedang diuji.
+- **Composer:** jangan memotong keluarannya dengan pipa seperti `head` atau
+  `tail`, karena bisa menghentikan instalasi di tengah jalan. Simpan
+  keluarannya ke file kalau perlu disaring.
 - **Membuat file:** pakai generator (`php artisan make:...`) dengan
   `--no-interaction`. Catat file mana yang dibuat generator atau paket dan
   mana yang ditulis tangan, karena keduanya masuk laporan.

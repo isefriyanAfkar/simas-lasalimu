@@ -14,6 +14,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Pages\SettingsPage;
 use Filament\Schemas\Schema;
+use Filament\Support\Components\Attributes\Unexposed;
 use Filament\Support\Facades\FilamentView;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Validation\ValidationException;
@@ -89,6 +90,10 @@ class KelolaPengaturanSekolah extends SettingsPage
      */
     public function save(): void
     {
+        if (! $this->canEdit()) {
+            return;
+        }
+
         /** @var User $pelaku */
         $pelaku = Filament::auth()->user();
 
@@ -110,5 +115,14 @@ class KelolaPengaturanSekolah extends SettingsPage
         if ($redirectUrl = $this->getRedirectUrl()) {
             $this->redirect($redirectUrl, navigate: FilamentView::hasSpaMode($redirectUrl));
         }
+    }
+
+    /**
+     * Reload after saving, so the panel brand (name and logo) shows the new values.
+     */
+    #[Unexposed]
+    public function getRedirectUrl(): ?string
+    {
+        return static::getUrl();
     }
 }

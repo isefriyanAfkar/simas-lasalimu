@@ -7,6 +7,7 @@ use App\Domains\Foundation\Enums\Jenjang;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
 use BackedEnum;
+use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -24,8 +25,11 @@ use Spatie\LaravelSettings\Exceptions\MissingSettings;
  * - nama_sekolah is required when saving; npsn, when filled, is exactly 8 digits
  * - every change is logged (log "pengaturan") with old and new values, in the
  *   same transaction as the save
+ * - a logo path is accepted only if it is the current one, or lies inside
+ *   LOGO_DIRECTORY and exists on the disk
  * - a replaced or removed logo file is deleted, but only after the transaction
- *   commits, so a failed save never loses the current logo
+ *   commits, so a failed save never loses the current logo; only files inside
+ *   LOGO_DIRECTORY are ever deleted
  *
  * Reading for the panel (namaPanel, urlLogo) never throws: before the settings
  * table exists, for example during the first `php artisan migrate` on a new
@@ -56,7 +60,7 @@ class PengaturanSekolahService
             throw new AuthorizationException('Hanya super admin yang boleh mengubah pengaturan sekolah.');
         }
 
-        $validated = $this->validate($data);
+        $validated = $this->validate($data, $this->settings()->logo);
 
         return DB::transaction(function () use ($pelaku, $validated): PengaturanSekolah {
             $settings = $this->settings();
@@ -81,7 +85,7 @@ class PengaturanSekolahService
 
             $oldLogo = $before['logo'];
 
-            if ($oldLogo !== null && $oldLogo !== $after['logo']) {
+            if ($oldLogo !== null && $oldLogo !== $after['logo'] && $this->isInLogoDirectory((string) $oldLogo)) {
                 DB::afterCommit(fn () => Storage::disk(self::LOGO_DISK)->delete($oldLogo));
             }
 
@@ -108,7 +112,7 @@ class PengaturanSekolahService
      * @param  array<string, mixed>  $data
      * @return array{nama_sekolah: string, npsn: ?string, jenjang: ?string, alamat: ?string, telepon: ?string, email: ?string, logo: ?string}
      */
-    private function validate(array $data): array
+    private function validate(array $data, ?string $currentLogo): array
     {
         $data = array_intersect_key($data, array_flip(self::FIELDS));
 
@@ -120,7 +124,11 @@ class PengaturanSekolahService
             'alamat' => ['nullable', 'string', 'max:1000'],
             'telepon' => ['nullable', 'string', 'max:30'],
             'email' => ['nullable', 'email', 'max:255'],
-            'logo' => ['nullable', 'string', 'max:255'],
+            'logo' => ['nullable', 'string', 'max:255', function (string $attribute, mixed $value, Closure $fail) use ($currentLogo): void {
+                if ($value !== $currentLogo && ! $this->isStoredLogo((string) $value)) {
+                    $fail('Logo tidak valid.');
+                }
+            }],
         ], [
             'npsn.regex' => 'NPSN harus terdiri dari tepat 8 digit angka.',
         ], [
@@ -137,6 +145,23 @@ class PengaturanSekolahService
             'email' => $validated['email'] ?? null,
             'logo' => $validated['logo'] ?? null,
         ];
+    }
+
+    /**
+     * A logo path from the form is trusted only if it points into this
+     * service's own folder and the file exists. Livewire state can be
+     * tampered with, so the form's FileUpload is not proof of an upload.
+     */
+    private function isStoredLogo(string $path): bool
+    {
+        return $this->isInLogoDirectory($path) && Storage::disk(self::LOGO_DISK)->exists($path);
+    }
+
+    private function isInLogoDirectory(string $path): bool
+    {
+        return str_starts_with($path, self::LOGO_DIRECTORY.'/')
+            && ! str_contains($path, '..')
+            && ! str_contains($path, '\\');
     }
 
     /**

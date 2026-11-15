@@ -43,6 +43,7 @@ class AdminPanelBrandTest extends TestCase
     public function test_panel_logo_follows_the_school_settings(): void
     {
         Storage::fake('public');
+        Storage::disk('public')->put('logo-sekolah/logo.png', 'logo');
         app(PengaturanSekolahService::class)->simpan(User::factory()->superAdmin()->create(), [
             'nama_sekolah' => 'SMA Negeri 1 Lasalimu',
             'logo' => 'logo-sekolah/logo.png',
