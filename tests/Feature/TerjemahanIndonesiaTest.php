@@ -51,6 +51,15 @@ class TerjemahanIndonesiaTest extends TestCase
         }
     }
 
+    public function test_messages_use_the_word_email_like_the_form_labels(): void
+    {
+        $errors = Validator::make(['email' => 'bukan-email'], ['email' => ['email']])->errors();
+
+        $this->assertSame('Email harus berupa alamat email yang valid.', $errors->first('email'));
+        $this->assertSame('Kami sudah mengirim email yang berisi tautan untuk mereset kata sandi Anda!', __('passwords.sent'));
+        $this->assertSame('Kami tidak dapat menemukan pengguna dengan alamat email tersebut.', __('passwords.user'));
+    }
+
     public function test_auth_pagination_and_passwords_messages_are_indonesian(): void
     {
         $this->assertSame('Identitas tersebut tidak cocok dengan data kami.', __('auth.failed'));
