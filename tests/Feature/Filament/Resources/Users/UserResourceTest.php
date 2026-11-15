@@ -83,6 +83,24 @@ class UserResourceTest extends TestCase
         $this->assertTrue($user->status_aktif);
     }
 
+    public function test_create_form_rejects_a_taken_username_and_a_short_password(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        User::factory()->operator()->create(['username' => 'siti']);
+
+        Livewire::test(CreateUser::class)
+            ->fillForm([
+                'name' => 'Siti Lain',
+                'username' => 'siti',
+                'peran' => Peran::Operator->value,
+                'password' => 'pendek',
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['username' => 'unique', 'password']);
+
+        $this->assertSame(1, User::query()->where('username', 'siti')->count());
+    }
+
     public function test_edit_form_shows_rule_violation_and_keeps_the_record_unchanged(): void
     {
         $superAdmin = User::factory()->superAdmin()->create(['name' => 'Nama Lama']);

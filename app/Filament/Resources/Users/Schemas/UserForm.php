@@ -9,7 +9,6 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
-use Illuminate\Validation\Rules\Password;
 
 class UserForm
 {
@@ -24,8 +23,8 @@ class UserForm
                 TextInput::make('username')
                     ->label('Nama pengguna')
                     ->required()
-                    ->maxLength(255)
-                    ->unique(ignoreRecord: true),
+                    ->rules(fn (?User $record): array => UserService::usernameRules($record))
+                    ->validationMessages(['unique' => 'Username sudah dipakai.']),
                 TextInput::make('email')
                     ->label('Email')
                     ->email()
@@ -40,7 +39,7 @@ class UserForm
                     ->password()
                     ->revealable()
                     ->required()
-                    ->rule(Password::defaults())
+                    ->rules(UserService::passwordRules())
                     ->visibleOn('create'),
             ]);
     }

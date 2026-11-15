@@ -1,0 +1,114 @@
+# Pemasangan SIMAS
+
+Perintah sisi aplikasi untuk memasang dan memperbarui SIMAS di server. Langkah
+khusus penyedia hosting (panel, domain, PHP, akses SSH) tidak dibahas di sini.
+
+Kebutuhan server: PHP 8.4, Composer, MariaDB 11.8. Node dan `npm run build`
+**tidak diperlukan**: aset Filament disalin dari `vendor/` oleh Composer
+(`filament:upgrade` di script `post-autoload-dump`).
+
+Semua perintah dijalankan dari folder aplikasi.
+
+## Pemasangan pertama
+
+### 1. Unduh dependensi
+
+```bash
+composer install --no-dev --optimize-autoloader
+```
+
+### 2. Siapkan `.env`
+
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+Lalu ubah isian berikut di `.env`:
+
+```dotenv
+APP_NAME="SIMAS"
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://alamat-sekolah.sch.id
+APP_TIMEZONE=Asia/Makassar
+APP_LOCALE=id
+
+LOG_LEVEL=error
+
+DB_CONNECTION=mariadb
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=nama_database
+DB_USERNAME=nama_pengguna_database
+DB_PASSWORD=kata_sandi_database
+```
+
+- `APP_DEBUG` wajib `false` di produksi, karena kalau `true` pesan galat menampilkan isi konfigurasi.
+- Kata sandi database hanya disimpan di `.env` server, jangan di repo.
+
+### 3. Buat tabel dan data awal
+
+```bash
+php artisan migrate --force
+php artisan db:seed --class=PeranDanIzinSeeder --force
+```
+
+- `migrate --force` membuat semua tabel, termasuk tabel pengaturan dan nilai awalnya.
+- `PeranDanIzinSeeder` membuat role `super_admin` dan `operator` serta izin
+  pengguna. Seeder ini aman dijalankan berulang.
+- **Jangan** menjalankan `php artisan db:seed` tanpa `--class`. `DatabaseSeeder`
+  memakai factory untuk data contoh, dan factory butuh paket pengembangan yang
+  tidak terpasang dengan `--no-dev`.
+
+### 4. Tautkan folder unggahan
+
+```bash
+php artisan storage:link
+```
+
+Logo sekolah disimpan di `storage/app/public` dan disajikan lewat `public/storage`.
+
+### 5. Cache untuk produksi
+
+```bash
+php artisan optimize
+php artisan filament:optimize
+```
+
+### 6. Buat super admin pertama
+
+```bash
+php artisan simas:buat-super-admin
+```
+
+Perintah ini menanyakan nama, username, kata sandi, dan konfirmasi kata sandi.
+Isiannya diperiksa dengan aturan yang sama dengan aplikasi: username unik dan
+kata sandi minimal 8 karakter. Perintah ini juga bisa dijalankan lagi kapan pun
+untuk menambah super admin. Pembuatan tercatat di Log Aktivitas dengan pelaku
+"Sistem".
+
+Setelah itu buka `APP_URL`. Halaman awal langsung mengalihkan ke halaman login.
+
+## Pembaruan
+
+```bash
+php artisan down
+
+git pull
+composer install --no-dev --optimize-autoloader
+
+php artisan migrate --force
+php artisan db:seed --class=PeranDanIzinSeeder --force
+
+php artisan optimize:clear
+php artisan optimize
+php artisan filament:optimize
+
+php artisan up
+```
+
+- `optimize:clear` membuang cache lama sebelum cache baru dibuat, supaya
+  perubahan config, route, dan view ikut terbaca.
+- Kalau `migrate --force` gagal, aplikasi tetap dalam mode pemeliharaan.
+  Perbaiki penyebabnya dulu, baru jalankan `php artisan up`.

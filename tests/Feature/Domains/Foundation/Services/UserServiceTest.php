@@ -11,6 +11,7 @@ use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
@@ -292,6 +293,64 @@ class UserServiceTest extends TestCase
         );
 
         $this->assertSame(0, Activity::query()->count());
+    }
+
+    public function test_system_creates_an_active_super_admin_logged_without_actor(): void
+    {
+        $user = $this->service()->createSuperAdminFromSystem([
+            'name' => 'Kepala TU',
+            'username' => 'KepalaTU',
+            'password' => 'rahasia-kuat-123',
+            'password_confirmation' => 'rahasia-kuat-123',
+        ]);
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'username' => 'kepalatu', 'status_aktif' => true]);
+        $this->assertTrue($user->fresh()->hasRole(Peran::SuperAdmin->value));
+
+        $activity = Activity::query()->where('event', 'dibuat')->sole();
+        $this->assertNull($activity->causer_type);
+        $this->assertNull($activity->causer_id);
+        $this->assertTrue($activity->subject->is($user));
+        $this->assertSame('super_admin', $activity->attribute_changes['attributes']['peran']);
+    }
+
+    /**
+     * @param  array<string, string>  $override
+     */
+    #[DataProvider('invalidSystemSuperAdminData')]
+    public function test_system_super_admin_creation_applies_the_application_rules(array $override, string $field): void
+    {
+        User::factory()->operator()->create(['username' => 'budi']);
+
+        try {
+            $this->service()->createSuperAdminFromSystem([
+                'name' => 'Kepala TU',
+                'username' => 'kepalatu',
+                'password' => 'rahasia-kuat-123',
+                'password_confirmation' => 'rahasia-kuat-123',
+                ...$override,
+            ]);
+            $this->fail("Expected a validation error on [{$field}].");
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey($field, $exception->errors());
+        }
+
+        $this->assertSame(1, User::query()->count());
+        $this->assertSame(0, Activity::query()->count());
+    }
+
+    /**
+     * @return array<string, array{array<string, string>, string}>
+     */
+    public static function invalidSystemSuperAdminData(): array
+    {
+        return [
+            'nama kosong' => [['name' => ''], 'name'],
+            'username kosong' => [['username' => ''], 'username'],
+            'username dipakai, beda huruf' => [['username' => ' BUDI '], 'username'],
+            'kata sandi kurang dari 8' => [['password' => 'pendek', 'password_confirmation' => 'pendek'], 'password'],
+            'konfirmasi tidak cocok' => [['password_confirmation' => 'rahasia-lain-456'], 'password'],
+        ];
     }
 
     public function test_user_changes_own_name_and_it_is_logged(): void

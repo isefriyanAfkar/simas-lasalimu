@@ -6,6 +6,11 @@ use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\Rules\Unique;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The only place that writes user accounts. Every method takes the acting
@@ -192,6 +197,71 @@ class UserService
     }
 
     /**
+     * Create an active super_admin from the terminal (simas:buat-super-admin).
+     * There is no acting user: the log entry has no causer and shows as
+     * "Sistem". Allowed at any time, also when other super admins exist.
+     *
+     * @param  array{name: string, username: string, password: string, password_confirmation: string}  $data
+     *
+     * @throws ValidationException
+     */
+    public function createSuperAdminFromSystem(array $data): User
+    {
+        $data['username'] = User::normalizeUsername($data['username']);
+
+        /** @var array{name: string, username: string, password: string} $validated */
+        $validated = Validator::make($data, [
+            'name' => ['required', 'string', 'max:255'],
+            'username' => self::usernameRules(),
+            'password' => [...self::passwordRules(), 'confirmed'],
+        ], [
+            'username.unique' => 'Username sudah dipakai.',
+            'password.confirmed' => 'Konfirmasi kata sandi tidak cocok.',
+        ], [
+            'name' => 'nama',
+            'password' => 'kata sandi',
+        ])->validate();
+
+        return DB::transaction(function () use ($validated): User {
+            $user = User::create([
+                'name' => $validated['name'],
+                'username' => $validated['username'],
+                'email' => null,
+                'password' => $validated['password'],
+                'status_aktif' => true,
+            ]);
+
+            $user->syncRoles([Peran::SuperAdmin->value]);
+
+            $this->log(AksiPengguna::Dibuat, null, $user, [
+                'attributes' => [...$user->only(self::LOGGED_ATTRIBUTES), 'peran' => Peran::SuperAdmin->value],
+            ]);
+
+            return $user;
+        });
+    }
+
+    /**
+     * Username rules shared by every entry point (panel form, terminal).
+     *
+     * @return list<string|Unique>
+     */
+    public static function usernameRules(?User $ignore = null): array
+    {
+        return ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($ignore)];
+    }
+
+    /**
+     * Password rules shared by every entry point (panel forms, terminal).
+     *
+     * @return list<string|Password>
+     */
+    public static function passwordRules(): array
+    {
+        return ['required', 'string', Password::defaults()];
+    }
+
+    /**
      * Whether $pelaku may change $user at all. Also used by UserPolicy so the
      * UI hides what the service would reject.
      */
@@ -263,12 +333,15 @@ class UserService
     }
 
     /**
+     * A null $pelaku means the system (terminal) did it; shown as "Sistem".
+     *
      * @param  array{attributes: array<string, mixed>, old?: array<string, mixed>}|null  $changes
      */
-    private function log(AksiPengguna $aksi, User $pelaku, User $user, ?array $changes = null): void
+    private function log(AksiPengguna $aksi, ?User $pelaku, User $user, ?array $changes = null): void
     {
-        $logger = activity(self::LOG_NAME)
-            ->causedBy($pelaku)
+        $logger = activity(self::LOG_NAME);
+        $logger = $pelaku === null ? $logger->causedByAnonymous() : $logger->causedBy($pelaku);
+        $logger = $logger
             ->performedOn($user)
             ->event($aksi->value);
 

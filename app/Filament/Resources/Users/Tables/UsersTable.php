@@ -15,7 +15,6 @@ use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Validation\Rules\Password;
 
 class UsersTable
 {
@@ -77,7 +76,7 @@ class UsersTable
                             ->password()
                             ->revealable()
                             ->required()
-                            ->rule(Password::defaults())
+                            ->rules(UserService::passwordRules())
                             ->confirmed(),
                         TextInput::make('password_confirmation')
                             ->label('Ulangi kata sandi baru')
