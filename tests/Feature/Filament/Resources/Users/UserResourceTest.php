@@ -101,6 +101,38 @@ class UserResourceTest extends TestCase
         $this->assertSame(1, User::query()->where('username', 'siti')->count());
     }
 
+    public function test_create_form_rejects_a_taken_username_written_with_spaces_and_other_case(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        User::factory()->operator()->create(['username' => 'siti']);
+
+        Livewire::test(CreateUser::class)
+            ->fillForm([
+                'name' => 'Siti Lain',
+                'username' => ' SITI ',
+                'peran' => Peran::Operator->value,
+                'password' => 'rahasia-kuat-123',
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['username' => 'unique']);
+
+        $this->assertSame(1, User::query()->where('username', 'siti')->count());
+    }
+
+    public function test_edit_form_rejects_the_username_of_another_user(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        User::factory()->operator()->create(['username' => 'siti']);
+        $budi = User::factory()->operator()->create(['username' => 'budi']);
+
+        Livewire::test(EditUser::class, ['record' => $budi->getRouteKey()])
+            ->fillForm(['username' => 'Siti'])
+            ->call('save')
+            ->assertHasFormErrors(['username' => 'unique']);
+
+        $this->assertSame('budi', $budi->fresh()->username);
+    }
+
     public function test_edit_form_shows_rule_violation_and_keeps_the_record_unchanged(): void
     {
         $superAdmin = User::factory()->superAdmin()->create(['name' => 'Nama Lama']);

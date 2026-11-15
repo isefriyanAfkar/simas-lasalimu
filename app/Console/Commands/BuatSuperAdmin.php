@@ -22,6 +22,12 @@ class BuatSuperAdmin extends Command
 {
     public function handle(UserService $userService): int
     {
+        if (! $this->input->isInteractive()) {
+            $this->components->error('Perintah ini harus dijalankan secara interaktif dari terminal, tanpa --no-interaction.');
+
+            return self::FAILURE;
+        }
+
         $data = [
             'name' => text(label: 'Nama', required: true),
             'username' => text(label: 'Username', required: true),

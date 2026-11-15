@@ -23,6 +23,7 @@ class UserForm
                 TextInput::make('username')
                     ->label('Nama pengguna')
                     ->required()
+                    ->mutateStateForValidationUsing(fn (?string $state): ?string => filled($state) ? User::normalizeUsername($state) : $state)
                     ->rules(fn (?User $record): array => UserService::usernameRules($record))
                     ->validationMessages(['unique' => 'Username sudah dipakai.']),
                 TextInput::make('email')

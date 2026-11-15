@@ -207,6 +207,7 @@ class UserService
      */
     public function createSuperAdminFromSystem(array $data): User
     {
+        $data['name'] = trim($data['name']);
         $data['username'] = User::normalizeUsername($data['username']);
 
         /** @var array{name: string, username: string, password: string} $validated */

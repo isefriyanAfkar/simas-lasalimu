@@ -78,6 +78,23 @@ class BuatSuperAdminTest extends TestCase
         $this->assertSame(0, User::query()->count());
     }
 
+    public function test_refuses_to_run_without_an_interactive_terminal(): void
+    {
+        $this->artisan('simas:buat-super-admin', ['--no-interaction' => true])
+            ->expectsOutputToContain('Perintah ini harus dijalankan secara interaktif')
+            ->assertExitCode(1);
+
+        $this->assertSame(0, User::query()->count());
+    }
+
+    public function test_trims_the_name(): void
+    {
+        $this->runCommand('  Kepala TU  ', 'kepalatu', 'rahasia-kuat-123', 'rahasia-kuat-123')
+            ->assertExitCode(0);
+
+        $this->assertSame('Kepala TU', User::query()->where('username', 'kepalatu')->sole()->name);
+    }
+
     private function runCommand(string $name, string $username, string $password, string $confirmation): PendingCommand
     {
         return $this->artisan('simas:buat-super-admin')

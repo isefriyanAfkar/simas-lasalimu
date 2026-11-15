@@ -20,9 +20,14 @@ composer install --no-dev --optimize-autoloader
 ### 2. Siapkan `.env`
 
 ```bash
-cp .env.example .env
+cp -n .env.example .env
 php artisan key:generate
 ```
+
+Kedua perintah ini **hanya untuk server yang belum punya `.env`**. `cp -n` tidak
+menimpa `.env` yang sudah ada. Jangan menjalankan `key:generate` lagi pada
+server yang sudah dipakai, karena kunci baru membuat semua pengguna keluar
+dari sesi dan data yang dienkripsi dengan kunci lama tidak bisa dibaca lagi.
 
 Lalu ubah isian berikut di `.env`:
 
@@ -61,7 +66,7 @@ php artisan db:seed --class=PeranDanIzinSeeder --force
   memakai factory untuk data contoh, dan factory butuh paket pengembangan yang
   tidak terpasang dengan `--no-dev`.
 
-### 4. Tautkan folder unggahan
+### 4. Tautkan folder unggahan dan periksa izin tulis
 
 ```bash
 php artisan storage:link
@@ -69,12 +74,18 @@ php artisan storage:link
 
 Logo sekolah disimpan di `storage/app/public` dan disajikan lewat `public/storage`.
 
+Folder `storage/` dan `bootstrap/cache/` harus bisa ditulis oleh pengguna yang
+menjalankan PHP di server web. Kalau tidak, halaman gagal dimuat dan unggahan
+logo gagal disimpan.
+
 ### 5. Cache untuk produksi
 
 ```bash
 php artisan optimize
-php artisan filament:optimize
 ```
+
+`optimize` sudah mencakup cache config, route, view, dan event, cache komponen
+dan ikon Filament (`filament:optimize`), serta cache kelas pengaturan.
 
 ### 6. Buat super admin pertama
 
@@ -103,12 +114,13 @@ php artisan db:seed --class=PeranDanIzinSeeder --force
 
 php artisan optimize:clear
 php artisan optimize
-php artisan filament:optimize
 
 php artisan up
 ```
 
-- `optimize:clear` membuang cache lama sebelum cache baru dibuat, supaya
-  perubahan config, route, dan view ikut terbaca.
-- Kalau `migrate --force` gagal, aplikasi tetap dalam mode pemeliharaan.
-  Perbaiki penyebabnya dulu, baru jalankan `php artisan up`.
+- `optimize:clear` membuang cache lama, termasuk cache Filament, sebelum cache
+  baru dibuat, supaya perubahan config, route, dan view ikut terbaca.
+- Kalau **salah satu** langkah gagal (`git pull`, `composer install`, `migrate`,
+  atau yang lain), aplikasi tetap dalam mode pemeliharaan dan pengunjung melihat
+  halaman "sedang diperbarui". Perbaiki penyebabnya, ulangi langkah yang gagal
+  dan langkah sesudahnya, lalu jalankan `php artisan up`.
