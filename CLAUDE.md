@@ -149,7 +149,7 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 ## Aturan proyek SIMAS
 
-- Stack terkunci: PHP 8.4, Laravel 13, MySQL 8, Filament 5, Livewire 4, Tailwind 4,
+- Stack terkunci: PHP 8.4, Laravel 13, MariaDB 11.8, mengikuti Hostinger, Filament 5, Livewire 4, Tailwind 4,
   PHPUnit, Pint. Jangan menambah paket tanpa persetujuan.
 - Lingkup saat ini hanya fondasi: Foundation (pengguna, role, pengaturan, audit),
   Academic (tahun ajaran, semester, kelas, rombel, mapel, penugasan guru),
