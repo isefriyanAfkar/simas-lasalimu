@@ -41,7 +41,10 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // Relative on purpose: the browser resolves it against whatever
+            // address the panel was opened from, so logos and FileUpload
+            // previews never depend on APP_URL being correct.
+            'url' => '/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

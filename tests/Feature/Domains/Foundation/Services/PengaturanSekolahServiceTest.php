@@ -259,7 +259,7 @@ class PengaturanSekolahServiceTest extends TestCase
         $this->service()->simpan($superAdmin, [...$this->validData(), 'logo' => 'logo-sekolah/logo.png']);
 
         $this->assertSame('SMA Negeri 1 Lasalimu', $this->service()->namaPanel());
-        $this->assertSame(Storage::disk('public')->url('logo-sekolah/logo.png'), $this->service()->urlLogo());
+        $this->assertSame('/storage/logo-sekolah/logo.png', $this->service()->urlLogo());
     }
 
     public function test_panel_name_and_logo_are_null_when_the_settings_table_is_missing(): void

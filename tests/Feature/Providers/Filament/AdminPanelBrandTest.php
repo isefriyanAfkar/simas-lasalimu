@@ -49,7 +49,30 @@ class AdminPanelBrandTest extends TestCase
             'logo' => 'logo-sekolah/logo.png',
         ]);
 
-        $this->assertSame(Storage::disk('public')->url('logo-sekolah/logo.png'), Filament::getPanel('admin')->getBrandLogo());
+        $this->assertSame('/storage/logo-sekolah/logo.png', Filament::getPanel('admin')->getBrandLogo());
+    }
+
+    /**
+     * Uses the real public disk (not Storage::fake, whose URL is always
+     * relative), so the URL comes from config/filesystems.php as in production.
+     * An absolute URL built from APP_URL breaks when the site is opened from
+     * another address.
+     */
+    public function test_panel_logo_url_is_relative_so_it_works_from_any_address(): void
+    {
+        $path = 'logo-sekolah/test-'.uniqid().'.png';
+        Storage::disk('public')->put($path, 'logo');
+
+        try {
+            app(PengaturanSekolahService::class)->simpan(User::factory()->superAdmin()->create(), [
+                'nama_sekolah' => 'SMA Negeri 1 Lasalimu',
+                'logo' => $path,
+            ]);
+
+            $this->assertSame('/storage/'.$path, Filament::getPanel('admin')->getBrandLogo());
+        } finally {
+            Storage::disk('public')->delete($path);
+        }
     }
 
     public function test_login_page_still_works_when_the_settings_table_is_missing(): void

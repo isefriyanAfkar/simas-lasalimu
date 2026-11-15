@@ -90,6 +90,30 @@ class PengaturanSekolahPageTest extends TestCase
         $this->assertSame('logo-sekolah/logo.png', app(PengaturanSekolah::class)->logo);
     }
 
+    /**
+     * The FileUpload preview is fetched by the browser from this URL; an
+     * absolute APP_URL-based URL leaves the field spinning when the site is
+     * opened from another address. Uses the real public disk on purpose.
+     */
+    public function test_logo_preview_url_in_the_form_is_relative(): void
+    {
+        $path = 'logo-sekolah/test-'.uniqid().'.png';
+        Storage::disk('public')->put($path, 'logo');
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        try {
+            app(PengaturanSekolahService::class)->simpan($superAdmin, ['nama_sekolah' => 'SMA Negeri 1 Lasalimu', 'logo' => $path]);
+            $this->actingAs($superAdmin);
+
+            $page = Livewire::test(KelolaPengaturanSekolah::class)->instance();
+            $logoField = $page->form->getFlatFields(withHidden: true)['logo'];
+
+            $this->assertSame('/storage/'.$path, $logoField->getUploadedFile($path, null)['url'] ?? null);
+        } finally {
+            Storage::disk('public')->delete($path);
+        }
+    }
+
     public function test_tampered_logo_path_is_rejected_and_no_file_is_deleted(): void
     {
         Storage::fake('public');
