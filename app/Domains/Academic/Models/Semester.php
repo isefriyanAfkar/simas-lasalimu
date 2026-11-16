@@ -6,6 +6,7 @@ use App\Domains\Academic\Enums\JenisSemester;
 use App\Domains\Academic\Policies\SemesterPolicy;
 use Database\Factories\SemesterFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Attributes\UsePolicy;
@@ -20,6 +21,10 @@ use Spatie\Activitylog\Support\LogOptions;
  * Created and deleted only together with its TahunAjaran by
  * TahunAjaranService; only its dates change, through SemesterService.
  *
+ * penanda_aktif is a database-only generated column (1 while active, NULL
+ * otherwise) whose unique index allows one active row. It is hidden and its
+ * in-memory value goes stale after an update; never read it.
+ *
  * @property JenisSemester $jenis
  * @property Carbon $tanggal_mulai
  * @property Carbon $tanggal_selesai
@@ -28,6 +33,7 @@ use Spatie\Activitylog\Support\LogOptions;
  */
 #[Table('semester')]
 #[Fillable(['tahun_ajaran_id', 'jenis', 'tanggal_mulai', 'tanggal_selesai', 'status_aktif'])]
+#[Hidden(['penanda_aktif'])]
 #[UseFactory(SemesterFactory::class)]
 #[UsePolicy(SemesterPolicy::class)]
 class Semester extends Model

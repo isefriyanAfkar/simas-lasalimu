@@ -53,6 +53,12 @@ class UserService
     private const array LOGGED_ATTRIBUTES = ['name', 'username', 'email', 'status_aktif'];
 
     /**
+     * Input is validated before the role check, because the role must be a
+     * known Peran first. So invalid input (for example a taken username) is
+     * reported before a role the actor may not grant. This reveals nothing:
+     * the actor sees those usernames anyway. update() checks whether the actor
+     * may manage the user first, since there the target already exists.
+     *
      * @param  array{name: string, username: string, email?: string|null, password: string, peran: string}  $data
      *
      * @throws ValidationException

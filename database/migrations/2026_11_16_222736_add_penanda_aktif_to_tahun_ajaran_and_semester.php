@@ -25,13 +25,23 @@ return new class extends Migration
             }
         }
 
+        // Each piece is added only when missing, so a run that stopped halfway
+        // can simply be run again.
         foreach (self::TABLES as $tabel) {
-            Schema::table($tabel, function (Blueprint $table): void {
-                $table->boolean('penanda_aktif')
-                    ->nullable()
-                    ->virtualAs('if(status_aktif, 1, null)')
-                    ->after('status_aktif')
-                    ->unique();
+            $adaKolom = Schema::hasColumn($tabel, 'penanda_aktif');
+            $adaIndeks = Schema::hasIndex($tabel, "{$tabel}_penanda_aktif_unique", 'unique');
+
+            Schema::table($tabel, function (Blueprint $table) use ($adaKolom, $adaIndeks): void {
+                if (! $adaKolom) {
+                    $table->boolean('penanda_aktif')
+                        ->nullable()
+                        ->virtualAs('if(status_aktif, 1, null)')
+                        ->after('status_aktif');
+                }
+
+                if (! $adaIndeks) {
+                    $table->unique('penanda_aktif');
+                }
             });
         }
     }

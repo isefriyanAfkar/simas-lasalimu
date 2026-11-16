@@ -7,6 +7,7 @@ use App\Domains\Academic\Models\TahunAjaran;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -44,6 +45,31 @@ class SatuPeriodeAktifTest extends TestCase
         TahunAjaran::factory()->count(3)->create();
 
         $this->assertSame(3, DB::table('tahun_ajaran')->whereNull('penanda_aktif')->count());
+    }
+
+    /**
+     * A half-applied run (MariaDB DDL is not transactional) must be safe to
+     * retry; when everything is already there, up() changes nothing.
+     */
+    public function test_migration_can_run_again_over_an_applied_schema(): void
+    {
+        $migration = require database_path('migrations/2026_11_16_222736_add_penanda_aktif_to_tahun_ajaran_and_semester.php');
+
+        $migration->up();
+
+        foreach (['tahun_ajaran', 'semester'] as $tabel) {
+            $this->assertTrue(Schema::hasColumn($tabel, 'penanda_aktif'));
+            $this->assertTrue(Schema::hasIndex($tabel, "{$tabel}_penanda_aktif_unique", 'unique'));
+        }
+    }
+
+    public function test_the_marker_column_stays_out_of_serialized_models(): void
+    {
+        $tahunAjaran = TahunAjaran::factory()->create();
+        $semester = Semester::factory()->for($tahunAjaran)->create();
+
+        $this->assertArrayNotHasKey('penanda_aktif', $tahunAjaran->fresh()->toArray());
+        $this->assertArrayNotHasKey('penanda_aktif', $semester->fresh()->toArray());
     }
 
     private function assertDuplicateKey(callable $operation): void

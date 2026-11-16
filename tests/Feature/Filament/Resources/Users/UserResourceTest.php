@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament\Resources\Users;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
+use App\Domains\Foundation\Services\UserService;
 use App\Filament\Pages\Auth\Login;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
@@ -15,7 +16,9 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class UserResourceTest extends TestCase
@@ -131,6 +134,74 @@ class UserResourceTest extends TestCase
             ->assertHasFormErrors(['username' => 'unique']);
 
         $this->assertSame('budi', $budi->fresh()->username);
+    }
+
+    public function test_edit_form_keeps_the_users_own_email(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $siti = User::factory()->operator()->create(['name' => 'Siti', 'email' => 'siti@sekolah.test']);
+
+        Livewire::test(EditUser::class, ['record' => $siti->getRouteKey()])
+            ->fillForm(['name' => 'Siti Aminah'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('Siti Aminah', $siti->fresh()->name);
+        $this->assertSame('siti@sekolah.test', $siti->fresh()->email);
+    }
+
+    public function test_edit_form_rejects_the_email_of_another_user(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        User::factory()->operator()->create(['email' => 'budi@sekolah.test']);
+        $siti = User::factory()->operator()->create(['email' => 'siti@sekolah.test']);
+
+        Livewire::test(EditUser::class, ['record' => $siti->getRouteKey()])
+            ->fillForm(['email' => 'budi@sekolah.test'])
+            ->call('save')
+            ->assertHasFormErrors(['email' => 'unique']);
+
+        $this->assertSame('siti@sekolah.test', $siti->fresh()->email);
+    }
+
+    /**
+     * The form checks the same rules first, so the service only rejects on a
+     * race; its errors must still land on the fields.
+     */
+    public function test_service_validation_errors_land_on_the_create_form_fields(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $this->partialMock(UserService::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('create')
+            ->andThrow(ValidationException::withMessages(['username' => 'Username sudah dipakai.'])));
+
+        Livewire::test(CreateUser::class)
+            ->fillForm([
+                'name' => 'Siti Aminah',
+                'username' => 'siti',
+                'peran' => Peran::Operator->value,
+                'password' => 'rahasia-kuat-123',
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['username']);
+
+        $this->assertSame(0, User::query()->where('username', 'siti')->count());
+    }
+
+    public function test_service_validation_errors_land_on_the_edit_form_fields(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $siti = User::factory()->operator()->create(['email' => 'siti@sekolah.test']);
+        $this->partialMock(UserService::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('update')
+            ->andThrow(ValidationException::withMessages(['email' => 'Email sudah dipakai.'])));
+
+        Livewire::test(EditUser::class, ['record' => $siti->getRouteKey()])
+            ->fillForm(['email' => 'siti.baru@sekolah.test'])
+            ->call('save')
+            ->assertHasFormErrors(['email']);
+
+        $this->assertSame('siti@sekolah.test', $siti->fresh()->email);
     }
 
     public function test_edit_form_shows_rule_violation_and_keeps_the_record_unchanged(): void
