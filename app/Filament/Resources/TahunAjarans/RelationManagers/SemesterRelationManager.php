@@ -80,7 +80,7 @@ class SemesterRelationManager extends RelationManager
                     ->icon(Heroicon::OutlinedCheckCircle)
                     ->color('success')
                     ->requiresConfirmation()
-                    ->hidden(fn (Semester $record): bool => $record->status_aktif)
+                    ->hidden(fn (Semester $record): bool => $record->status_aktif || ! $record->tahunAjaran->status_aktif)
                     ->authorize('update')
                     ->action(function (Semester $record): void {
                         /** @var User $pelaku */

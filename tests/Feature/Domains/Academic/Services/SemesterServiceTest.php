@@ -84,11 +84,36 @@ class SemesterServiceTest extends TestCase
         $this->assertValidationError('tanggal_selesai', fn () => app(SemesterService::class)->updateDates($ganjil, ['tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => $ganjilSelesai]));
     }
 
-    public function test_rejects_genap_that_starts_before_ganjil_ends(): void
+    /**
+     * Ganjil ends on 2026-12-31.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function genapStartsTooEarly(): array
+    {
+        return [
+            'Genap mulai di hari Ganjil selesai' => ['2026-12-31'],
+            'Genap mulai sebelum Ganjil selesai' => ['2026-12-20'],
+        ];
+    }
+
+    #[DataProvider('genapStartsTooEarly')]
+    public function test_rejects_genap_that_does_not_start_after_ganjil_ends(string $genapMulai): void
     {
         $genap = $this->schoolYear()->semesterGenap;
 
-        $this->assertValidationError('tanggal_mulai', fn () => app(SemesterService::class)->updateDates($genap, ['tanggal_mulai' => '2026-12-20', 'tanggal_selesai' => '2027-06-26']));
+        $this->assertValidationError('tanggal_mulai', fn () => app(SemesterService::class)->updateDates($genap, ['tanggal_mulai' => $genapMulai, 'tanggal_selesai' => '2027-06-26']));
+    }
+
+    public function test_accepts_semesters_on_the_school_year_bounds_and_back_to_back(): void
+    {
+        $tahunAjaran = $this->schoolYear();
+
+        app(SemesterService::class)->updateDates($tahunAjaran->semesterGanjil, ['tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2026-12-31']);
+        app(SemesterService::class)->updateDates($tahunAjaran->semesterGenap, ['tanggal_mulai' => '2027-01-01', 'tanggal_selesai' => '2027-06-26']);
+
+        $this->assertSame('2026-07-13', $tahunAjaran->semesterGanjil->fresh()->tanggal_mulai->toDateString());
+        $this->assertSame('2027-06-26', $tahunAjaran->semesterGenap->fresh()->tanggal_selesai->toDateString());
     }
 
     public function test_rejects_an_end_date_before_the_start_date(): void

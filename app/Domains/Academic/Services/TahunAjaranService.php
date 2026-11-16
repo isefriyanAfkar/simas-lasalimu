@@ -8,7 +8,6 @@ use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Models\User;
 use Closure;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -36,7 +35,12 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  */
 class TahunAjaranService
 {
-    public const string LOG_NAME = 'akademik';
+    /**
+     * Two first saves into an empty table can deadlock on the gap lock taken
+     * by validate(); the retry then sees the other row and fails validation
+     * instead of ending in a server error.
+     */
+    private const int ATTEMPTS = 3;
 
     /**
      * @param  array{nama: string, tanggal_mulai: string, tanggal_selesai: string}  $data
@@ -66,7 +70,7 @@ class TahunAjaranService
             ]);
 
             return $tahunAjaran;
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
@@ -82,7 +86,7 @@ class TahunAjaranService
             $tahunAjaran->update($validated);
 
             return $tahunAjaran;
-        });
+        }, self::ATTEMPTS);
     }
 
     public function activate(User $pelaku, TahunAjaran $tahunAjaran): TahunAjaran
@@ -94,7 +98,7 @@ class TahunAjaranService
             if (! $tahunAjaran->status_aktif) {
                 TahunAjaran::query()->whereKeyNot($tahunAjaran->getKey())->where('status_aktif', true)->update(['status_aktif' => false]);
                 $tahunAjaran->update(['status_aktif' => true]);
-                $this->logActivation(AksiAkademik::TahunAjaranDiaktifkan, $pelaku, $tahunAjaran);
+                AktivitasAkademik::logActivation(AksiAkademik::TahunAjaranDiaktifkan, $pelaku, $tahunAjaran);
             }
 
             if ($tahunAjaran->semester()->where('status_aktif', true)->doesntExist()) {
@@ -102,7 +106,7 @@ class TahunAjaranService
 
                 Semester::query()->where('status_aktif', true)->update(['status_aktif' => false]);
                 $semester->update(['status_aktif' => true]);
-                $this->logActivation(AksiAkademik::SemesterDiaktifkan, $pelaku, $semester);
+                AktivitasAkademik::logActivation(AksiAkademik::SemesterDiaktifkan, $pelaku, $semester);
             }
 
             return $tahunAjaran;
@@ -127,20 +131,6 @@ class TahunAjaranService
 
             $tahunAjaran->delete();
         });
-    }
-
-    /**
-     * Log an activation explicitly; the LogsActivity trait leaves
-     * status_aktif out on purpose.
-     */
-    public static function logActivation(AksiAkademik $aksi, User $pelaku, Model $subject): void
-    {
-        activity(self::LOG_NAME)
-            ->causedBy($pelaku)
-            ->performedOn($subject)
-            ->event($aksi->value)
-            ->withChanges(['attributes' => ['status_aktif' => true], 'old' => ['status_aktif' => false]])
-            ->log($aksi->label());
     }
 
     private function semesterForToday(TahunAjaran $tahunAjaran): Semester
@@ -171,9 +161,9 @@ class TahunAjaranService
             'nama' => [
                 'required',
                 'string',
-                'regex:/^\d{4}\/\d{4}$/',
+                'regex:/^\d{4}\/\d{4}\z/',
                 function (string $attribute, mixed $value, Closure $fail): void {
-                    if (is_string($value) && preg_match('/^(\d{4})\/(\d{4})$/', $value, $years) === 1 && (int) $years[2] !== (int) $years[1] + 1) {
+                    if (is_string($value) && preg_match('/^(\d{4})\/(\d{4})\z/', $value, $years) === 1 && (int) $years[2] !== (int) $years[1] + 1) {
                         $fail('Tahun kedua pada nama harus tahun pertama ditambah satu, misalnya 2026/2027.');
                     }
                 },
@@ -215,7 +205,8 @@ class TahunAjaranService
                 ->first();
 
             if ($bertumpang !== null) {
-                $validator->errors()->add('tanggal_mulai', "Rentang tanggal bertumpang tindih dengan tahun ajaran {$bertumpang->nama}.");
+                $field = $bertumpang->tanggal_mulai->toDateString() <= $mulai ? 'tanggal_mulai' : 'tanggal_selesai';
+                $validator->errors()->add($field, "Rentang tanggal bertumpang tindih dengan tahun ajaran {$bertumpang->nama}.");
             }
 
             if ($ignore !== null) {

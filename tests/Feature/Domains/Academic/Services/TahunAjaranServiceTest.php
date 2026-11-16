@@ -57,6 +57,7 @@ class TahunAjaranServiceTest extends TestCase
             'tahun kedua sama' => ['2026/2026'],
             'terbalik' => ['2027/2026'],
             'ada spasi' => ['2026 / 2027'],
+            'baris baru di akhir' => ["2026/2027\n"],
         ];
     }
 
@@ -96,45 +97,44 @@ class TahunAjaranServiceTest extends TestCase
     }
 
     /**
-     * @return array<string, array{string, string}>
+     * @return array<string, array{string, string, string}>
      */
     public static function datesOutsideTheNamedYears(): array
     {
         return [
-            'mulai bukan di tahun pertama' => ['2027-01-04', '2027-06-26'],
-            'selesai bukan di tahun kedua' => ['2026-07-13', '2026-12-20'],
+            'mulai bukan di tahun pertama' => ['2027-01-04', '2027-06-26', 'tanggal_mulai'],
+            'selesai bukan di tahun kedua' => ['2026-07-13', '2026-12-20', 'tanggal_selesai'],
         ];
     }
 
     #[DataProvider('datesOutsideTheNamedYears')]
-    public function test_rejects_dates_that_do_not_start_in_the_first_and_end_in_the_second_year(string $mulai, string $selesai): void
+    public function test_rejects_dates_that_do_not_start_in_the_first_and_end_in_the_second_year(string $mulai, string $selesai, string $field): void
     {
-        $this->expectException(ValidationException::class);
-
-        $this->create('2026/2027', $mulai, $selesai);
+        $this->assertValidationError($field, fn () => $this->create('2026/2027', $mulai, $selesai));
     }
 
     /**
-     * Existing school year: 2026-07-13 .. 2027-06-26.
+     * Existing school year: 2026-07-13 .. 2027-06-26. The error goes on the
+     * date that crosses into it.
      *
-     * @return array<string, array{string, string, string}>
+     * @return array<string, array{string, string, string, string}>
      */
     public static function overlappingRanges(): array
     {
         return [
-            'menyentuh dari depan' => ['2025/2026', '2025-07-14', '2026-07-13'],
-            'menyentuh dari belakang' => ['2027/2028', '2027-06-26', '2028-06-24'],
-            'bertumpang di depan' => ['2025/2026', '2025-07-14', '2026-08-01'],
-            'bertumpang di belakang' => ['2027/2028', '2027-06-01', '2028-06-24'],
+            'menyentuh dari depan' => ['2025/2026', '2025-07-14', '2026-07-13', 'tanggal_selesai'],
+            'menyentuh dari belakang' => ['2027/2028', '2027-06-26', '2028-06-24', 'tanggal_mulai'],
+            'bertumpang di depan' => ['2025/2026', '2025-07-14', '2026-08-01', 'tanggal_selesai'],
+            'bertumpang di belakang' => ['2027/2028', '2027-06-01', '2028-06-24', 'tanggal_mulai'],
         ];
     }
 
     #[DataProvider('overlappingRanges')]
-    public function test_rejects_a_range_that_overlaps_another_school_year(string $nama, string $mulai, string $selesai): void
+    public function test_rejects_a_range_that_overlaps_another_school_year(string $nama, string $mulai, string $selesai, string $field): void
     {
         $this->create('2026/2027', '2026-07-13', '2027-06-26');
 
-        $this->assertValidationError('tanggal_mulai', fn () => $this->create($nama, $mulai, $selesai));
+        $this->assertValidationError($field, fn () => $this->create($nama, $mulai, $selesai));
 
         $this->assertSame(1, TahunAjaran::query()->count());
     }
@@ -187,6 +187,19 @@ class TahunAjaranServiceTest extends TestCase
         ]));
 
         $this->assertSame('2026-07-13', $tahunAjaran->fresh()->tanggal_mulai->toDateString());
+    }
+
+    public function test_rejects_an_update_that_ends_before_the_last_semester_ends(): void
+    {
+        $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
+
+        $this->assertValidationError('tanggal_selesai', fn () => $this->service()->update($tahunAjaran, [
+            'nama' => '2026/2027',
+            'tanggal_mulai' => '2026-07-13',
+            'tanggal_selesai' => '2027-06-20',
+        ]));
+
+        $this->assertSame('2027-06-26', $tahunAjaran->fresh()->tanggal_selesai->toDateString());
     }
 
     public function test_activating_deactivates_the_other_school_year_and_its_semesters(): void

@@ -153,6 +153,16 @@ class TahunAjaranResourceTest extends TestCase
         $this->assertSame(JenisSemester::Genap, Semester::query()->where('status_aktif', true)->sole()->jenis);
     }
 
+    public function test_semester_activate_action_is_hidden_while_the_school_year_is_inactive(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $tahunAjaran = $this->schoolYear();
+
+        Livewire::test(SemesterRelationManager::class, ['ownerRecord' => $tahunAjaran, 'pageClass' => EditTahunAjaran::class])
+            ->assertActionHidden(TestAction::make('aktifkan')->table($tahunAjaran->semesterGanjil))
+            ->assertActionHidden(TestAction::make('aktifkan')->table($tahunAjaran->semesterGenap));
+    }
+
     public function test_semester_date_rule_violation_is_shown_on_the_field(): void
     {
         $this->actingAs(User::factory()->operator()->create());
