@@ -24,7 +24,10 @@ use Illuminate\Validation\ValidationException;
  * - a non super_admin cannot grant the super_admin or operator role
  *
  * create() and update() validate their input here (see validateAccountData),
- * whatever the caller already checked.
+ * whatever the caller already checked. Every save that checks username or
+ * email uniqueness does so inside a transaction that first locks the user
+ * rows, and KeunikanDatabase turns a unique index violation that still
+ * happens into a field error.
  *
  * Every successful write is recorded in the activity log (log "pengguna") in
  * the same transaction. Only the attributes in LOGGED_ATTRIBUTES (and the role
@@ -48,6 +51,24 @@ class UserService
     private const string LOG_NAME = 'pengguna';
 
     /**
+     * Saves that check username/email uniqueness lock the user rows first;
+     * two such saves can deadlock on the gap lock, and the retry then sees
+     * the other row and fails validation.
+     */
+    private const int ATTEMPTS = 3;
+
+    /**
+     * Unique indexes whose violation (a save that slipped past the unique
+     * rule) becomes a field error instead of a server error.
+     *
+     * @var array<string, array{string, string}>
+     */
+    private const array INDEKS_UNIK = [
+        'users_username_unique' => ['username', 'Username ini baru saja dipakai pengguna lain. Periksa lagi, lalu simpan.'],
+        'users_email_unique' => ['email', 'Email ini baru saja dipakai pengguna lain. Periksa lagi, lalu simpan.'],
+    ];
+
+    /**
      * @var list<string>
      */
     private const array LOGGED_ATTRIBUTES = ['name', 'username', 'email', 'status_aktif'];
@@ -65,12 +86,12 @@ class UserService
      */
     public function create(User $pelaku, array $data): User
     {
-        $data = $this->validateAccountData($data, null);
-        $peran = Peran::from($data['peran']);
+        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $data): User {
+            $data = $this->validateAccountData($data, null);
+            $peran = Peran::from($data['peran']);
 
-        $this->ensureCanGrantRole($pelaku, $peran);
+            $this->ensureCanGrantRole($pelaku, $peran);
 
-        return DB::transaction(function () use ($pelaku, $data, $peran): User {
             $user = User::create([
                 'name' => $data['name'],
                 'username' => $data['username'],
@@ -86,7 +107,7 @@ class UserService
             ]);
 
             return $user;
-        });
+        }, self::ATTEMPTS));
     }
 
     /**
@@ -98,14 +119,14 @@ class UserService
     {
         $this->ensureCanManage($pelaku, $user);
 
-        $data = $this->validateAccountData($data, $user);
-        $peran = Peran::from($data['peran']);
+        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data): User {
+            $data = $this->validateAccountData($data, $user);
+            $peran = Peran::from($data['peran']);
 
-        if (! $user->hasRole($peran->value)) {
-            $this->ensureCanGrantRole($pelaku, $peran);
-        }
+            if (! $user->hasRole($peran->value)) {
+                $this->ensureCanGrantRole($pelaku, $peran);
+            }
 
-        return DB::transaction(function () use ($pelaku, $user, $data, $peran): User {
             if ($peran !== Peran::SuperAdmin) {
                 $this->ensureNotLastActiveSuperAdmin($user);
             }
@@ -135,7 +156,7 @@ class UserService
             }
 
             return $user;
-        });
+        }, self::ATTEMPTS));
     }
 
     public function activate(User $pelaku, User $user): User
@@ -225,20 +246,22 @@ class UserService
         $data['name'] = trim($data['name']);
         $data['username'] = User::normalizeUsername($data['username']);
 
-        /** @var array{name: string, username: string, password: string} $validated */
-        $validated = Validator::make($data, [
-            'name' => ['required', 'string', 'max:255'],
-            'username' => self::usernameRules(),
-            'password' => [...self::passwordRules(), 'confirmed'],
-        ], [
-            'username.unique' => 'Username sudah dipakai.',
-            'password.confirmed' => 'Konfirmasi kata sandi tidak cocok.',
-        ], [
-            'name' => 'nama',
-            'password' => 'kata sandi',
-        ])->validate();
+        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($data): User {
+            $this->lockUsers();
 
-        return DB::transaction(function () use ($validated): User {
+            /** @var array{name: string, username: string, password: string} $validated */
+            $validated = Validator::make($data, [
+                'name' => ['required', 'string', 'max:255'],
+                'username' => self::usernameRules(),
+                'password' => [...self::passwordRules(), 'confirmed'],
+            ], [
+                'username.unique' => 'Username sudah dipakai.',
+                'password.confirmed' => 'Konfirmasi kata sandi tidak cocok.',
+            ], [
+                'name' => 'nama',
+                'password' => 'kata sandi',
+            ])->validate();
+
             $user = User::create([
                 'name' => $validated['name'],
                 'username' => $validated['username'],
@@ -254,7 +277,7 @@ class UserService
             ]);
 
             return $user;
-        });
+        }, self::ATTEMPTS));
     }
 
     /**
@@ -326,7 +349,8 @@ class UserService
      * required) and update() (password not accepted here). The name is
      * trimmed and the username normalized first, like every other entry
      * point. The panel form checks the same rules for convenience; this is
-     * the check that counts.
+     * the check that counts. Must run inside a transaction (it locks the
+     * user rows before the unique checks).
      *
      * @param  array<string, mixed>  $data
      * @return array{name: string, username: string, email: string|null, peran: string, password?: string}
@@ -335,6 +359,8 @@ class UserService
      */
     private function validateAccountData(array $data, ?User $ignore): array
     {
+        $this->lockUsers();
+
         if (is_string($data['name'] ?? null)) {
             $data['name'] = trim($data['name']);
         }
@@ -365,6 +391,15 @@ class UserService
         ])->validate();
 
         return [...$validated, 'email' => filled($validated['email'] ?? null) ? $validated['email'] : null];
+    }
+
+    /**
+     * Must run inside a transaction, before a username/email unique check,
+     * so two concurrent saves are serialized instead of both passing it.
+     */
+    private function lockUsers(): void
+    {
+        User::query()->lockForUpdate()->get(['id']);
     }
 
     private function changeStatus(User $pelaku, User $user, bool $statusAktif): void

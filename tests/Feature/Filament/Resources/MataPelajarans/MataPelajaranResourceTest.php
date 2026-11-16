@@ -53,6 +53,29 @@ class MataPelajaranResourceTest extends TestCase
             ->assertCanSeeTableRecords([$agama, $matematika, $sejarah], inOrder: true);
     }
 
+    public function test_sorting_by_urutan_keeps_empty_urutan_last_in_both_directions(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $kosong = MataPelajaran::factory()->create(['urutan' => null]);
+        $satu = MataPelajaran::factory()->create(['urutan' => 1]);
+        $dua = MataPelajaran::factory()->create(['urutan' => 2]);
+
+        Livewire::test(ListMataPelajarans::class)
+            ->sortTable('urutan')
+            ->assertCanSeeTableRecords([$satu, $dua, $kosong], inOrder: true)
+            ->sortTable('urutan', 'desc')
+            ->assertCanSeeTableRecords([$dua, $satu, $kosong], inOrder: true);
+    }
+
+    public function test_user_without_role_cannot_open_the_create_and_edit_pages(): void
+    {
+        $mataPelajaran = MataPelajaran::factory()->create();
+        $this->actingAs(User::factory()->create());
+
+        $this->get(MataPelajaranResource::getUrl('create'))->assertForbidden();
+        $this->get(MataPelajaranResource::getUrl('edit', ['record' => $mataPelajaran]))->assertForbidden();
+    }
+
     public function test_list_can_be_searched_by_code_and_by_name(): void
     {
         $this->actingAs(User::factory()->operator()->create());

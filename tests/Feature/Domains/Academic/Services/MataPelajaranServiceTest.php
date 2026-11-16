@@ -7,6 +7,7 @@ use App\Domains\Academic\Services\MataPelajaranService;
 use App\Domains\Foundation\Models\User;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
@@ -67,7 +68,103 @@ class MataPelajaranServiceTest extends TestCase
             'nama kembar beda huruf' => [['nama' => ' MATEMATIKA '], 'nama'],
             'urutan bukan bilangan bulat' => [['urutan' => '1.5'], 'urutan'],
             'urutan negatif' => [['urutan' => -1], 'urutan'],
+            'urutan lebih dari 65535' => [['urutan' => 65536], 'urutan'],
+            'kode berhuruf non-ASCII' => [['kode' => 'MTKÉ'], 'kode'],
+            'nama kembar diapit spasi tak terputus' => [['nama' => "\u{00A0}Matematika\u{00A0}"], 'nama'],
         ];
+    }
+
+    public function test_urutan_accepts_the_largest_value(): void
+    {
+        $mataPelajaran = $this->service()->create(['kode' => 'MTK', 'nama' => 'Matematika', 'urutan' => 65535]);
+
+        $this->assertSame(65535, $mataPelajaran->fresh()->urutan);
+    }
+
+    public function test_name_whitespace_is_normalized_so_near_duplicates_are_caught(): void
+    {
+        $this->service()->create(['kode' => 'BIND', 'nama' => "\u{00A0} Bahasa  \t Indonesia\u{00A0}"]);
+
+        $this->assertSame('Bahasa Indonesia', MataPelajaran::query()->sole()->nama);
+        $this->assertValidationError('nama', fn () => $this->service()->create(['kode' => 'BIND2', 'nama' => "Bahasa\u{00A0}Indonesia"]));
+    }
+
+    public function test_a_taken_code_message_names_the_inactive_subject_holding_it(): void
+    {
+        MataPelajaran::factory()->nonaktif()->create(['kode' => 'MTK', 'nama' => 'Matematika']);
+
+        try {
+            $this->service()->create(['kode' => 'mtk', 'nama' => 'Matematika Baru']);
+            $this->fail('A taken code was accepted.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(
+                ['Kode MTK sudah dipakai oleh mata pelajaran Matematika yang sedang tidak aktif. Aktifkan lagi mata pelajaran itu bila ingin memakainya.'],
+                $exception->errors()['kode'],
+            );
+        }
+    }
+
+    public function test_a_taken_name_message_names_the_active_subject_holding_it(): void
+    {
+        MataPelajaran::factory()->create(['kode' => 'MTK', 'nama' => 'Matematika']);
+
+        try {
+            $this->service()->create(['kode' => 'MTK2', 'nama' => 'matematika']);
+            $this->fail('A taken name was accepted.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['Nama ini sudah dipakai oleh mata pelajaran MTK.'], $exception->errors()['nama']);
+        }
+    }
+
+    /**
+     * Simulates another operator saving the same value between this save's
+     * validation and its write: the unique index must end as a field error.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function uniqueFields(): array
+    {
+        return [
+            'kode' => ['kode'],
+            'nama' => ['nama'],
+        ];
+    }
+
+    #[DataProvider('uniqueFields')]
+    public function test_a_concurrent_create_with_the_same_value_ends_as_a_field_error(string $field): void
+    {
+        MataPelajaran::creating(function (MataPelajaran $mataPelajaran) use ($field): void {
+            DB::table('mata_pelajaran')->insert([
+                'kode' => $field === 'kode' ? $mataPelajaran->kode : 'LAIN',
+                'nama' => $field === 'nama' ? $mataPelajaran->nama : 'Lain',
+                'status_aktif' => true,
+            ]);
+        });
+
+        $this->assertValidationError($field, fn () => $this->service()->create(['kode' => 'MTK', 'nama' => 'Matematika']));
+
+        $this->assertSame(0, MataPelajaran::query()->count());
+    }
+
+    public function test_a_concurrent_update_with_the_same_code_ends_as_a_field_error(): void
+    {
+        $mataPelajaran = $this->service()->create(['kode' => 'MTK', 'nama' => 'Matematika']);
+        MataPelajaran::updating(function (): void {
+            DB::table('mata_pelajaran')->insert(['kode' => 'MTKW', 'nama' => 'Lain', 'status_aktif' => true]);
+        });
+
+        $this->assertValidationError('kode', fn () => $this->service()->update($mataPelajaran, ['kode' => 'MTKW', 'nama' => 'Matematika']));
+
+        $this->assertSame('MTK', $mataPelajaran->fresh()->kode);
+    }
+
+    public function test_deactivating_writes_no_trait_update_entry(): void
+    {
+        $mataPelajaran = $this->service()->create(['kode' => 'MTK', 'nama' => 'Matematika']);
+
+        $this->service()->deactivate(User::factory()->operator()->create(), $mataPelajaran);
+
+        $this->assertSame(0, Activity::query()->where('event', 'updated')->where('subject_type', $mataPelajaran->getMorphClass())->count());
     }
 
     /**

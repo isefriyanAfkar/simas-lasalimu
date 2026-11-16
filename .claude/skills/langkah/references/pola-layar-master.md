@@ -28,6 +28,24 @@ CLAUDE.md.
   Contoh: `app/Domains/Academic/Services/PelanggaranAturanAkademik.php`.
 - Baris yang dibaca untuk validasi dikunci dengan `lockForUpdate`. Kalau
   penyimpanan pertama bisa bertabrakan, tambahkan `attempts` pada transaksi.
+- Field unik (kode, nama, username, email) dijaga dua lapis:
+  - validasi `unique` dijalankan di dalam `DB::transaction(..., attempts)`
+    setelah baris tabelnya dikunci dengan `lockForUpdate`, jadi dua
+    penyimpanan bersamaan berjalan bergiliran;
+  - seluruh operasi dibungkus
+    `App\Domains\Foundation\Services\KeunikanDatabase::jaga()`, yang
+    mengubah pelanggaran indeks unik di database menjadi galat field,
+    bukan galat 500.
+
+  Contoh: `create()` dan `update()` di
+  `app/Domains/Academic/Services/MataPelajaranService.php`. Test-nya meniru
+  penyimpanan bersamaan dengan listener `creating` atau `updating` yang
+  menyisipkan baris kembar setelah validasi lolos; lihat
+  `test_a_concurrent_create_with_the_same_value_ends_as_a_field_error`.
+- Pesan "sudah dipakai" menyebut pemilik nilainya, termasuk kalau pemiliknya
+  sedang tidak aktif (bisa tersembunyi oleh filter status).
+- Teks dari form dinormalkan sebelum divalidasi: spasi di tepi dibuang, dan
+  deretan spasi di tengah, termasuk spasi Unicode seperti NBSP, dijadikan satu.
 - Aturan "paling banyak satu yang aktif" dijaga dua lapis:
   - Service menonaktifkan yang lain lalu mengaktifkan yang dipilih, di bawah
     `lockForUpdate`;

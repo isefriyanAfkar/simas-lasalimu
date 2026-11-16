@@ -440,6 +440,77 @@ class UserServiceTest extends TestCase
         ];
     }
 
+    /**
+     * Simulates another admin saving the same value between this save's
+     * validation and its write: the unique index must end as a field error.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function uniqueAccountFields(): array
+    {
+        return [
+            'username' => ['username'],
+            'email' => ['email'],
+        ];
+    }
+
+    #[DataProvider('uniqueAccountFields')]
+    public function test_a_concurrent_create_with_the_same_value_ends_as_a_field_error(string $field): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        User::creating(function (User $user) use ($field): void {
+            DB::table('users')->insert([
+                'name' => 'Lain',
+                'username' => $field === 'username' ? $user->username : 'lain',
+                'email' => $field === 'email' ? $user->email : null,
+                'password' => 'x',
+                'status_aktif' => true,
+            ]);
+        });
+
+        $this->assertValidationError($field, fn () => $this->service()->create($superAdmin, [
+            'name' => 'Siti',
+            'username' => 'siti',
+            'email' => 'siti@sekolah.test',
+            'password' => 'rahasia-kuat-123',
+            'peran' => Peran::Operator->value,
+        ]));
+
+        $this->assertSame(1, User::query()->count());
+    }
+
+    public function test_a_concurrent_update_with_the_same_username_ends_as_a_field_error(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = User::factory()->operator()->create(['username' => 'siti']);
+        User::updating(function (): void {
+            DB::table('users')->insert(['name' => 'Lain', 'username' => 'siti.baru', 'password' => 'x', 'status_aktif' => true]);
+        });
+
+        $this->assertValidationError('username', fn () => $this->service()->update($superAdmin, $user, [
+            ...$this->updateData($user, Peran::Operator),
+            'username' => 'siti.baru',
+        ]));
+
+        $this->assertSame('siti', $user->fresh()->username);
+    }
+
+    public function test_a_concurrent_system_super_admin_creation_ends_as_a_field_error(): void
+    {
+        User::creating(function (User $user): void {
+            DB::table('users')->insert(['name' => 'Lain', 'username' => $user->username, 'password' => 'x', 'status_aktif' => true]);
+        });
+
+        $this->assertValidationError('username', fn () => $this->service()->createSuperAdminFromSystem([
+            'name' => 'Kepala TU',
+            'username' => 'kepalatu',
+            'password' => 'rahasia-kuat-123',
+            'password_confirmation' => 'rahasia-kuat-123',
+        ]));
+
+        $this->assertSame(0, User::query()->count());
+    }
+
     public function test_update_may_keep_its_own_username_and_email(): void
     {
         $user = User::factory()->operator()->create(['username' => 'siti', 'email' => 'siti@sekolah.test']);

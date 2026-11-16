@@ -28,7 +28,9 @@ class MataPelajaransTable
                 TextColumn::make('urutan')
                     ->label('Urutan')
                     ->placeholder('—')
-                    ->sortable(),
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query
+                        ->orderByRaw('urutan is null')
+                        ->orderBy('urutan', $direction)),
                 TextColumn::make('kode')
                     ->label('Kode')
                     ->searchable()
