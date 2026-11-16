@@ -4,6 +4,7 @@ namespace App\Filament\Resources\TahunAjarans\Pages;
 
 use App\Domains\Academic\Services\TahunAjaranService;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
+use App\Filament\Support\GalatValidasi;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
@@ -20,7 +21,7 @@ class CreateTahunAjaran extends CreateRecord
         try {
             return app(TahunAjaranService::class)->create($data);
         } catch (ValidationException $exception) {
-            throw TahunAjaranResource::prefixValidationErrors($exception, 'data');
+            throw GalatValidasi::prefix($exception, 'data');
         }
     }
 }

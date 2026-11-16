@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ActivityLogs\Tables;
 
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
+use App\Domains\Academic\Services\AktivitasAkademik;
 use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Models\User;
 use Filament\Forms\Components\DatePicker;
@@ -96,12 +97,8 @@ class ActivityLogsTable
             return $subject->username;
         }
 
-        if ($subject instanceof TahunAjaran) {
-            return "TA {$subject->nama}";
-        }
-
-        if ($subject instanceof Semester) {
-            return "{$subject->jenis->label()} {$subject->tahunAjaran->nama}";
+        if ($subject instanceof TahunAjaran || $subject instanceof Semester) {
+            return AktivitasAkademik::label($subject);
         }
 
         if ($activity->log_name === 'pengaturan') {
@@ -116,16 +113,15 @@ class ActivityLogsTable
     }
 
     /**
-     * "field: old → new" per changed attribute, or "field: value" when there is no old value.
+     * "field: old → new" per changed attribute, or "field: value" when there is
+     * no old value, followed by "menggantikan <label>" for an activation that
+     * replaced another period.
      */
     private static function describeChanges(Activity $activity): ?string
     {
         $new = $activity->attribute_changes['attributes'] ?? [];
         $old = $activity->attribute_changes['old'] ?? [];
-
-        if ($new === []) {
-            return null;
-        }
+        $digantikan = $activity->getProperty('menggantikan.label');
 
         $parts = [];
 
@@ -135,7 +131,11 @@ class ActivityLogsTable
                 : sprintf('%s: %s', $attribute, self::formatValue($attribute, $value));
         }
 
-        return implode('; ', $parts);
+        if (is_string($digantikan)) {
+            $parts[] = "menggantikan {$digantikan}";
+        }
+
+        return $parts === [] ? null : implode('; ', $parts);
     }
 
     private static function formatValue(string $attribute, mixed $value): string

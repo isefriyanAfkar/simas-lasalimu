@@ -6,11 +6,13 @@ use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Filament\Resources\Users\UserResource;
+use App\Filament\Support\GalatValidasi;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class EditUser extends EditRecord
 {
@@ -41,6 +43,8 @@ class EditUser extends EditRecord
 
         try {
             return app(UserService::class)->update($pelaku, $record, $data);
+        } catch (ValidationException $exception) {
+            throw GalatValidasi::prefix($exception, 'data');
         } catch (PelanggaranAturanPengguna $exception) {
             Notification::make()->danger()->title($exception->getMessage())->send();
 

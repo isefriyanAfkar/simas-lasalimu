@@ -92,9 +92,11 @@ class SemesterService
                 return $semester;
             }
 
+            $digantikan = Semester::query()->with('tahunAjaran')->where('status_aktif', true)->first();
+
             Semester::query()->where('status_aktif', true)->update(['status_aktif' => false]);
             $semester->update(['status_aktif' => true]);
-            AktivitasAkademik::logActivation(AksiAkademik::SemesterDiaktifkan, $pelaku, $semester);
+            AktivitasAkademik::logActivation(AksiAkademik::SemesterDiaktifkan, $pelaku, $semester, $digantikan);
 
             return $semester;
         });

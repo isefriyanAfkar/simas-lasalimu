@@ -7,7 +7,7 @@ use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\SemesterService;
 use App\Domains\Foundation\Models\User;
-use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
+use App\Filament\Support\GalatValidasi;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -70,7 +70,7 @@ class SemesterRelationManager extends RelationManager
                         try {
                             app(SemesterService::class)->updateDates($record, $data);
                         } catch (ValidationException $exception) {
-                            throw TahunAjaranResource::prefixValidationErrors($exception, 'mountedActions.'.($action->getNestingIndex() ?? 0).'.data');
+                            throw GalatValidasi::prefix($exception, 'mountedActions.'.($action->getNestingIndex() ?? 0).'.data');
                         }
 
                         Notification::make()->success()->title("Tanggal semester {$record->jenis->label()} diubah")->send();

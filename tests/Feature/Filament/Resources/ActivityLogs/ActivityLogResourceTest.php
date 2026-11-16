@@ -97,6 +97,27 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnFormattedStateSet('event', 'Tahun ajaran dibuat', $createdLog);
     }
 
+    public function test_activation_entry_shows_the_replaced_period_even_after_it_is_deleted(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->actingAs($superAdmin);
+        $service = app(TahunAjaranService::class);
+        $lama = $service->create(['nama' => '2025/2026', 'tanggal_mulai' => '2025-07-14', 'tanggal_selesai' => '2026-06-27']);
+        $baru = $service->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26']);
+        $this->travelTo('2026-03-02');
+        $service->activate($superAdmin, $lama);
+        $this->travelTo('2026-09-15');
+        $service->activate($superAdmin, $baru);
+        $service->delete($lama->fresh());
+
+        $tahunAjaranLog = Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->latest('id')->first();
+        $semesterLog = Activity::query()->where('event', 'semester_diaktifkan')->latest('id')->first();
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('rincian', 'status_aktif: nonaktif → aktif; menggantikan TA 2025/2026', $tahunAjaranLog)
+            ->assertTableColumnStateSet('rincian', 'status_aktif: nonaktif → aktif; menggantikan Genap 2025/2026', $semesterLog);
+    }
+
     public function test_entry_without_actor_is_shown_as_sistem(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

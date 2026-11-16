@@ -149,6 +149,9 @@ class SemesterServiceTest extends TestCase
         $this->assertTrue($log->causer->is($operator));
         $this->assertTrue($log->subject->is($tahunAjaran->semesterGenap));
         $this->assertSame(['status_aktif' => true], $log->attribute_changes['attributes']);
+        $menggantikan = $log->getProperty('menggantikan');
+        ksort($menggantikan);
+        $this->assertSame(['id' => $tahunAjaran->semesterGanjil->id, 'label' => 'Ganjil 2026/2027'], $menggantikan);
     }
 
     public function test_rejects_activating_a_semester_of_an_inactive_school_year(): void

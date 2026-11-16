@@ -353,6 +353,105 @@ class UserServiceTest extends TestCase
         ];
     }
 
+    /**
+     * @param  array<string, string|null>  $override
+     */
+    #[DataProvider('invalidCreateData')]
+    public function test_create_validates_its_input_in_the_service(array $override, string $field): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        User::factory()->operator()->create(['username' => 'budi', 'email' => 'budi@sekolah.test']);
+
+        $this->assertValidationError($field, fn () => $this->service()->create($superAdmin, [
+            'name' => 'Siti Aminah',
+            'username' => 'siti',
+            'email' => 'siti@sekolah.test',
+            'password' => 'rahasia-kuat-123',
+            'peran' => Peran::Operator->value,
+            ...$override,
+        ]));
+
+        $this->assertSame(2, User::query()->count());
+        $this->assertSame(0, Activity::query()->where('event', 'dibuat')->count());
+    }
+
+    /**
+     * @return array<string, array{array<string, string|null>, string}>
+     */
+    public static function invalidCreateData(): array
+    {
+        return [
+            'nama kosong' => [['name' => '  '], 'name'],
+            'nama lebih dari 255' => [['name' => str_repeat('a', 256)], 'name'],
+            'username kosong' => [['username' => ''], 'username'],
+            'username dipakai, beda huruf' => [['username' => ' BUDI '], 'username'],
+            'email tidak valid' => [['email' => 'bukan-email'], 'email'],
+            'email dipakai' => [['email' => 'budi@sekolah.test'], 'email'],
+            'kata sandi kosong' => [['password' => ''], 'password'],
+            'kata sandi kurang dari 8' => [['password' => 'pendek'], 'password'],
+            'peran tidak dikenal' => [['peran' => 'kepala_sekolah'], 'peran'],
+        ];
+    }
+
+    public function test_create_stores_the_trimmed_name_and_normalized_username(): void
+    {
+        $user = $this->service()->create(User::factory()->superAdmin()->create(), [
+            'name' => '  Siti Aminah ',
+            'username' => ' Siti ',
+            'email' => null,
+            'password' => 'rahasia-kuat-123',
+            'peran' => Peran::Operator->value,
+        ]);
+
+        $this->assertSame('Siti Aminah', $user->fresh()->name);
+        $this->assertSame('siti', $user->fresh()->username);
+    }
+
+    /**
+     * @param  array<string, string|null>  $override
+     */
+    #[DataProvider('invalidUpdateData')]
+    public function test_update_validates_its_input_in_the_service(array $override, string $field): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        User::factory()->operator()->create(['username' => 'budi', 'email' => 'budi@sekolah.test']);
+        $user = User::factory()->operator()->create(['name' => 'Siti', 'username' => 'siti', 'email' => 'siti@sekolah.test']);
+
+        $this->assertValidationError($field, fn () => $this->service()->update($superAdmin, $user, [
+            ...$this->updateData($user, Peran::Operator),
+            ...$override,
+        ]));
+
+        $this->assertSame(['Siti', 'siti', 'siti@sekolah.test'], array_values($user->fresh()->only(['name', 'username', 'email'])));
+        $this->assertSame(0, Activity::query()->where('event', 'diubah')->count());
+    }
+
+    /**
+     * @return array<string, array{array<string, string|null>, string}>
+     */
+    public static function invalidUpdateData(): array
+    {
+        return [
+            'nama kosong' => [['name' => ''], 'name'],
+            'username milik orang lain' => [['username' => 'Budi'], 'username'],
+            'email tidak valid' => [['email' => 'bukan-email'], 'email'],
+            'email milik orang lain' => [['email' => 'budi@sekolah.test'], 'email'],
+            'peran tidak dikenal' => [['peran' => 'kepala_sekolah'], 'peran'],
+        ];
+    }
+
+    public function test_update_may_keep_its_own_username_and_email(): void
+    {
+        $user = User::factory()->operator()->create(['username' => 'siti', 'email' => 'siti@sekolah.test']);
+
+        $this->service()->update(User::factory()->superAdmin()->create(), $user, [
+            ...$this->updateData($user, Peran::Operator),
+            'name' => 'Siti Aminah',
+        ]);
+
+        $this->assertSame('Siti Aminah', $user->fresh()->name);
+    }
+
     public function test_user_changes_own_name_and_it_is_logged(): void
     {
         $operator = User::factory()->operator()->create(['name' => 'Nama Lama']);
@@ -519,6 +618,19 @@ class UserServiceTest extends TestCase
         $this->assertTrue($activity->subject->is($subjek), 'Wrong subject.');
 
         return $activity;
+    }
+
+    private function assertValidationError(string $field, Closure $operation): void
+    {
+        try {
+            $operation();
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey($field, $exception->errors(), 'Errors: '.json_encode($exception->errors()));
+
+            return;
+        }
+
+        $this->fail("Expected a validation error on [{$field}].");
     }
 
     private function assertRejected(PelanggaranAturanPengguna $expected, Closure $operation): void

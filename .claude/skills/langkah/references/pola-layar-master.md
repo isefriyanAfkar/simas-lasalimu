@@ -28,6 +28,14 @@ CLAUDE.md.
   Contoh: `app/Domains/Academic/Services/PelanggaranAturanAkademik.php`.
 - Baris yang dibaca untuk validasi dikunci dengan `lockForUpdate`. Kalau
   penyimpanan pertama bisa bertabrakan, tambahkan `attempts` pada transaksi.
+- Aturan "paling banyak satu yang aktif" dijaga dua lapis:
+  - Service menonaktifkan yang lain lalu mengaktifkan yang dipilih, di bawah
+    `lockForUpdate`;
+  - database memakai kolom turunan yang bernilai 1 saat aktif dan NULL saat
+    tidak, dengan indeks unik. Contoh:
+    `database/migrations/2026_11_16_222736_add_penanda_aktif_to_tahun_ajaran_and_semester.php`.
+    Migration itu memeriksa data lebih dulu, karena DDL MariaDB tidak ikut
+    transaksi.
 
 ## Hak akses
 
@@ -46,7 +54,7 @@ CLAUDE.md.
   data di layar.
 - Halaman Create dan Edit menimpa `handleRecordCreation` dan
   `handleRecordUpdate`, lalu meneruskan galat ke field form lewat
-  `TahunAjaranResource::prefixValidationErrors($e, 'data')`. Contoh:
+  `App\Filament\Support\GalatValidasi::prefix($e, 'data')`. Contoh:
   `app/Filament/Resources/TahunAjarans/Pages/CreateTahunAjaran.php`.
 - Aksi dengan form di modal memakai state path
   `'mountedActions.'.($action->getNestingIndex() ?? 0).'.data'`. Contoh: aksi

@@ -5,6 +5,7 @@ namespace App\Filament\Resources\TahunAjarans\Pages;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\TahunAjaranService;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
+use App\Filament\Support\GalatValidasi;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
@@ -26,7 +27,7 @@ class EditTahunAjaran extends EditRecord
         try {
             return app(TahunAjaranService::class)->update($record, $data);
         } catch (ValidationException $exception) {
-            throw TahunAjaranResource::prefixValidationErrors($exception, 'data');
+            throw GalatValidasi::prefix($exception, 'data');
         }
     }
 }

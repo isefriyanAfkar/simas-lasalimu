@@ -30,7 +30,8 @@ class UserForm
                     ->label('Email')
                     ->email()
                     ->maxLength(255)
-                    ->unique(ignoreRecord: true),
+                    ->rules(fn (?User $record): array => UserService::emailRules($record))
+                    ->validationMessages(['unique' => 'Email sudah dipakai.']),
                 Select::make('peran')
                     ->label('Role')
                     ->options(fn (?User $record): array => self::roleOptions($record))

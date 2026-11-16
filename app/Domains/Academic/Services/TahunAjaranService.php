@@ -96,17 +96,20 @@ class TahunAjaranService
             $tahunAjaran->refresh();
 
             if (! $tahunAjaran->status_aktif) {
+                $digantikan = TahunAjaran::query()->whereKeyNot($tahunAjaran->getKey())->where('status_aktif', true)->first();
+
                 TahunAjaran::query()->whereKeyNot($tahunAjaran->getKey())->where('status_aktif', true)->update(['status_aktif' => false]);
                 $tahunAjaran->update(['status_aktif' => true]);
-                AktivitasAkademik::logActivation(AksiAkademik::TahunAjaranDiaktifkan, $pelaku, $tahunAjaran);
+                AktivitasAkademik::logActivation(AksiAkademik::TahunAjaranDiaktifkan, $pelaku, $tahunAjaran, $digantikan);
             }
 
             if ($tahunAjaran->semester()->where('status_aktif', true)->doesntExist()) {
                 $semester = $this->semesterForToday($tahunAjaran);
+                $digantikan = Semester::query()->with('tahunAjaran')->where('status_aktif', true)->first();
 
                 Semester::query()->where('status_aktif', true)->update(['status_aktif' => false]);
                 $semester->update(['status_aktif' => true]);
-                AktivitasAkademik::logActivation(AksiAkademik::SemesterDiaktifkan, $pelaku, $semester);
+                AktivitasAkademik::logActivation(AksiAkademik::SemesterDiaktifkan, $pelaku, $semester, $digantikan);
             }
 
             return $tahunAjaran;

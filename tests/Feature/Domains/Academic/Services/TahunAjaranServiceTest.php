@@ -262,6 +262,36 @@ class TahunAjaranServiceTest extends TestCase
         $this->assertTrue($semesterLog->subject->is($tahunAjaran->semesterGanjil));
     }
 
+    public function test_activation_logs_record_the_periods_they_replace(): void
+    {
+        $lama = $this->create('2025/2026', '2025-07-14', '2026-06-27');
+        $baru = $this->create('2026/2027', '2026-07-13', '2027-06-26');
+        $this->travelTo('2026-03-02');
+        $this->service()->activate($this->superAdmin(), $lama);
+        $this->travelTo('2026-09-15');
+
+        $this->service()->activate($this->superAdmin(), $baru);
+
+        $tahunAjaranLog = Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->latest('id')->first();
+        $this->assertTrue($tahunAjaranLog->subject->is($baru));
+        $this->assertSameKeysAndValues(['id' => $lama->id, 'label' => 'TA 2025/2026'], $tahunAjaranLog->getProperty('menggantikan'));
+
+        $semesterLog = Activity::query()->where('event', 'semester_diaktifkan')->latest('id')->first();
+        $this->assertTrue($semesterLog->subject->is($baru->semesterGanjil));
+        $this->assertSameKeysAndValues(['id' => $lama->semesterGenap->id, 'label' => 'Genap 2025/2026'], $semesterLog->getProperty('menggantikan'));
+    }
+
+    public function test_first_activation_replaces_nothing(): void
+    {
+        $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
+        $this->travelTo('2026-09-15');
+
+        $this->service()->activate($this->superAdmin(), $tahunAjaran);
+
+        $this->assertNull(Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->sole()->getProperty('menggantikan'));
+        $this->assertNull(Activity::query()->where('event', 'semester_diaktifkan')->sole()->getProperty('menggantikan'));
+    }
+
     public function test_activating_the_already_active_school_year_changes_and_logs_nothing(): void
     {
         $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
@@ -319,6 +349,20 @@ class TahunAjaranServiceTest extends TestCase
     private function superAdmin(): User
     {
         return User::factory()->superAdmin()->create();
+    }
+
+    /**
+     * Strict comparison that ignores key order (MariaDB JSON reorders keys).
+     *
+     * @param  array<string, mixed>  $expected
+     */
+    private function assertSameKeysAndValues(array $expected, mixed $actual): void
+    {
+        $this->assertIsArray($actual);
+        ksort($expected);
+        ksort($actual);
+
+        $this->assertSame($expected, $actual);
     }
 
     private function assertValidationError(string $field, callable $operation): void

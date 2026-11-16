@@ -23,6 +23,9 @@ use Illuminate\Validation\ValidationException;
  *   super_admin or of another operator
  * - a non super_admin cannot grant the super_admin or operator role
  *
+ * create() and update() validate their input here (see validateAccountData),
+ * whatever the caller already checked.
+ *
  * Every successful write is recorded in the activity log (log "pengguna") in
  * the same transaction. Only the attributes in LOGGED_ATTRIBUTES (and the role
  * name) are ever written to the log, so passwords and remember tokens never
@@ -51,9 +54,12 @@ class UserService
 
     /**
      * @param  array{name: string, username: string, email?: string|null, password: string, peran: string}  $data
+     *
+     * @throws ValidationException
      */
     public function create(User $pelaku, array $data): User
     {
+        $data = $this->validateAccountData($data, null);
         $peran = Peran::from($data['peran']);
 
         $this->ensureCanGrantRole($pelaku, $peran);
@@ -79,11 +85,14 @@ class UserService
 
     /**
      * @param  array{name: string, username: string, email?: string|null, peran: string}  $data
+     *
+     * @throws ValidationException
      */
     public function update(User $pelaku, User $user, array $data): User
     {
         $this->ensureCanManage($pelaku, $user);
 
+        $data = $this->validateAccountData($data, $user);
         $peran = Peran::from($data['peran']);
 
         if (! $user->hasRole($peran->value)) {
@@ -253,6 +262,16 @@ class UserService
     }
 
     /**
+     * Email rules shared by the panel form and this service. Email is optional.
+     *
+     * @return list<string|Unique>
+     */
+    public static function emailRules(?User $ignore = null): array
+    {
+        return ['nullable', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($ignore)];
+    }
+
+    /**
      * Password rules shared by every entry point (panel forms, terminal).
      *
      * @return list<string|Password>
@@ -294,6 +313,52 @@ class UserService
             fn (string $value): bool => $this->canGrantRole($pelaku, Peran::from($value)),
             ARRAY_FILTER_USE_KEY,
         );
+    }
+
+    /**
+     * Validate the account fields of create() ($ignore null, password
+     * required) and update() (password not accepted here). The name is
+     * trimmed and the username normalized first, like every other entry
+     * point. The panel form checks the same rules for convenience; this is
+     * the check that counts.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{name: string, username: string, email: string|null, peran: string, password?: string}
+     *
+     * @throws ValidationException
+     */
+    private function validateAccountData(array $data, ?User $ignore): array
+    {
+        if (is_string($data['name'] ?? null)) {
+            $data['name'] = trim($data['name']);
+        }
+
+        if (is_string($data['username'] ?? null)) {
+            $data['username'] = User::normalizeUsername($data['username']);
+        }
+
+        $rules = [
+            'name' => ['required', 'string', 'max:255'],
+            'username' => self::usernameRules($ignore),
+            'email' => self::emailRules($ignore),
+            'peran' => ['required', Rule::enum(Peran::class)],
+        ];
+
+        if ($ignore === null) {
+            $rules['password'] = self::passwordRules();
+        }
+
+        /** @var array{name: string, username: string, email?: string|null, peran: string, password?: string} $validated */
+        $validated = Validator::make($data, $rules, [
+            'username.unique' => 'Username sudah dipakai.',
+            'email.unique' => 'Email sudah dipakai.',
+        ], [
+            'name' => 'nama',
+            'peran' => 'role',
+            'password' => 'kata sandi',
+        ])->validate();
+
+        return [...$validated, 'email' => filled($validated['email'] ?? null) ? $validated['email'] : null];
     }
 
     private function changeStatus(User $pelaku, User $user, bool $statusAktif): void

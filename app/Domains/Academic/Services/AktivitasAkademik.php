@@ -3,8 +3,9 @@
 namespace App\Domains\Academic\Services;
 
 use App\Domains\Academic\Enums\AksiAkademik;
+use App\Domains\Academic\Models\Semester;
+use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Models\User;
-use Illuminate\Database\Eloquent\Model;
 
 /**
  * Explicit activity log entries for the academic services, so
@@ -18,14 +19,34 @@ final class AktivitasAkademik
     /**
      * Log an activation; the LogsActivity trait on the models leaves
      * status_aktif out on purpose. Call it inside the writing transaction.
+     *
+     * The period it replaces, if any, is stored as properties.menggantikan
+     * = {id, label}; the label is kept as text so the entry stays readable
+     * after that period is deleted.
      */
-    public static function logActivation(AksiAkademik $aksi, User $pelaku, Model $subject): void
+    public static function logActivation(AksiAkademik $aksi, User $pelaku, TahunAjaran|Semester $subject, TahunAjaran|Semester|null $digantikan = null): void
     {
-        activity(self::LOG_NAME)
+        $logger = activity(self::LOG_NAME)
             ->causedBy($pelaku)
             ->performedOn($subject)
             ->event($aksi->value)
-            ->withChanges(['attributes' => ['status_aktif' => true], 'old' => ['status_aktif' => false]])
-            ->log($aksi->label());
+            ->withChanges(['attributes' => ['status_aktif' => true], 'old' => ['status_aktif' => false]]);
+
+        if ($digantikan !== null) {
+            $logger->withProperty('menggantikan', ['id' => $digantikan->getKey(), 'label' => self::label($digantikan)]);
+        }
+
+        $logger->log($aksi->label());
+    }
+
+    /**
+     * Short name of a period as shown in the activity log: "TA 2026/2027" or
+     * "Ganjil 2026/2027".
+     */
+    public static function label(TahunAjaran|Semester $periode): string
+    {
+        return $periode instanceof TahunAjaran
+            ? "TA {$periode->nama}"
+            : "{$periode->jenis->label()} {$periode->tahunAjaran->nama}";
     }
 }

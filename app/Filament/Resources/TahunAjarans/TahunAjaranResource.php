@@ -14,7 +14,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
-use Illuminate\Validation\ValidationException;
 
 /**
  * Excluded from Shield in config/filament-shield.php; access is decided by
@@ -60,20 +59,5 @@ class TahunAjaranResource extends Resource
             'create' => CreateTahunAjaran::route('/create'),
             'edit' => EditTahunAjaran::route('/{record}/edit'),
         ];
-    }
-
-    /**
-     * Service validation errors use plain keys (nama, tanggal_mulai); a
-     * Filament form expects them under its state path.
-     */
-    public static function prefixValidationErrors(ValidationException $exception, string $statePath): ValidationException
-    {
-        $errors = [];
-
-        foreach ($exception->errors() as $field => $messages) {
-            $errors["{$statePath}.{$field}"] = $messages;
-        }
-
-        return ValidationException::withMessages($errors);
     }
 }
