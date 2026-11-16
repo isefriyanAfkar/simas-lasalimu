@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ActivityLogs\Tables;
 
 use App\Domains\Academic\Models\MataPelajaran;
+use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\AktivitasAkademik;
@@ -29,7 +30,7 @@ class ActivityLogsTable
                 'causer',
                 'subject' => function (Relation $relation): void {
                     if ($relation instanceof MorphTo) {
-                        $relation->morphWith([Semester::class => ['tahunAjaran']]);
+                        $relation->morphWith([Semester::class => ['tahunAjaran'], Rombel::class => ['tahunAjaran']]);
                     }
                 },
             ]))
@@ -98,7 +99,7 @@ class ActivityLogsTable
             return $subject->username;
         }
 
-        if ($subject instanceof TahunAjaran || $subject instanceof Semester || $subject instanceof MataPelajaran) {
+        if ($subject instanceof TahunAjaran || $subject instanceof Semester || $subject instanceof MataPelajaran || $subject instanceof Rombel) {
             return AktivitasAkademik::label($subject);
         }
 

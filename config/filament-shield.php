@@ -5,6 +5,7 @@ use App\Domains\Foundation\Models\User;
 use App\Filament\Pages\KelolaPengaturanSekolah;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\MataPelajarans\MataPelajaranResource;
+use App\Filament\Resources\Rombels\RombelResource;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
 use App\Filament\Resources\Users\UserResource;
 use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
@@ -205,6 +206,7 @@ return [
             ActivityLogResource::class,
             TahunAjaranResource::class,
             MataPelajaranResource::class,
+            RombelResource::class,
         ],
     ],
 

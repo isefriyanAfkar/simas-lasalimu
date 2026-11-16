@@ -32,6 +32,8 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  *   and activates its semester for today, or Ganjil when today is in neither,
  *   so an active school year always has exactly one active semester
  * - only an inactive school year may be deleted; its semesters go with it
+ * - a school year used by rombel cannot be deleted (rombel restricts the
+ *   delete in the database too); the refusal names how many use it
  */
 class TahunAjaranService
 {
@@ -126,6 +128,12 @@ class TahunAjaranService
 
             if ($tahunAjaran->status_aktif) {
                 throw PelanggaranAturanAkademik::tahunAjaranAktifTidakBolehDihapus();
+            }
+
+            $jumlahRombel = $tahunAjaran->rombel()->count();
+
+            if ($jumlahRombel > 0) {
+                throw PelanggaranAturanAkademik::tahunAjaranDipakaiRombel($tahunAjaran->nama, $jumlahRombel);
             }
 
             foreach ($tahunAjaran->semester as $semester) {

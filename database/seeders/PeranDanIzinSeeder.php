@@ -11,7 +11,8 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Creates the panel roles and their permissions. Safe to run repeatedly.
  * The operator role deliberately receives no User permission for now, every
- * TahunAjaran permission except Delete, and every MataPelajaran permission.
+ * TahunAjaran and Rombel permission except Delete, and every MataPelajaran
+ * permission.
  */
 class PeranDanIzinSeeder extends Seeder
 {
@@ -51,8 +52,19 @@ class PeranDanIzinSeeder extends Seeder
     ];
 
     /**
-     * Permissions the operator role holds. Deleting a school year is left to
-     * the super_admin.
+     * @var list<string>
+     */
+    public const array ROMBEL_PERMISSIONS = [
+        'ViewAny:Rombel',
+        'View:Rombel',
+        'Create:Rombel',
+        'Update:Rombel',
+        'Delete:Rombel',
+    ];
+
+    /**
+     * Permissions the operator role holds. Deleting a school year or a rombel
+     * is left to the super_admin.
      *
      * @var list<string>
      */
@@ -62,6 +74,10 @@ class PeranDanIzinSeeder extends Seeder
         'Create:TahunAjaran',
         'Update:TahunAjaran',
         ...self::MATA_PELAJARAN_PERMISSIONS,
+        'ViewAny:Rombel',
+        'View:Rombel',
+        'Create:Rombel',
+        'Update:Rombel',
     ];
 
     public function run(): void
@@ -72,7 +88,7 @@ class PeranDanIzinSeeder extends Seeder
             Role::findOrCreate($peran->value, 'web');
         }
 
-        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS] as $permission) {
+        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 

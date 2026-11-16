@@ -50,6 +50,14 @@ class TahunAjaran extends Model
     }
 
     /**
+     * @return HasMany<Rombel, $this>
+     */
+    public function rombel(): HasMany
+    {
+        return $this->hasMany(Rombel::class);
+    }
+
+    /**
      * @return HasOne<Semester, $this>
      */
     public function semesterGanjil(): HasOne

@@ -3,10 +3,13 @@
 namespace Tests\Feature\Filament\Resources\ActivityLogs;
 
 use App\Domains\Academic\Services\MataPelajaranService;
+use App\Domains\Academic\Services\RombelService;
 use App\Domains\Academic\Services\TahunAjaranService;
+use App\Domains\Foundation\Enums\Jenjang;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Domains\Foundation\Services\UserService;
+use App\Domains\Foundation\Settings\PengaturanSekolah;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
 use Database\Seeders\PeranDanIzinSeeder;
@@ -132,6 +135,22 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnStateSet('objek', 'MTK Matematika', $log)
             ->assertTableColumnFormattedStateSet('event', 'Mata pelajaran dinonaktifkan', $log)
             ->assertTableColumnStateSet('rincian', 'status_aktif: aktif → nonaktif', $log);
+    }
+
+    public function test_rombel_entries_name_the_rombel_and_its_school_year(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $settings = app(PengaturanSekolah::class);
+        $settings->jenjang = Jenjang::Sma;
+        $settings->save();
+        $tahunAjaran = app(TahunAjaranService::class)->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26']);
+        $rombel = app(RombelService::class)->create(['tahun_ajaran_id' => $tahunAjaran->id, 'tingkat' => 10, 'nomor' => 1]);
+
+        $log = Activity::query()->where('event', 'created')->where('subject_type', $rombel->getMorphClass())->sole();
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'X-1 2026/2027', $log)
+            ->assertTableColumnFormattedStateSet('event', 'Rombel dibuat', $log);
     }
 
     public function test_entry_without_actor_is_shown_as_sistem(): void

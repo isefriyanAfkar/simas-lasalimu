@@ -174,6 +174,10 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
   dan varian AtauGagal), jangan query status_aktif sendiri.
 - Tabel yang kelak merujuk tahun_ajaran atau semester memakai restrictOnDelete,
   supaya tahun ajaran yang sudah dipakai tidak bisa terhapus.
+- Nama rombel (X-1, XI-2) tidak pernah disimpan atau dirakit sendiri. Selalu
+  baca lewat $rombel->nama, atau App\Domains\Academic\Models\Rombel::namaDari()
+  kalau belum memegang model. Berlaku untuk jadwal, jurnal, presensi, dan modul
+  lain.
 - Hak akses lewat Policy dan Spatie Permission.
 - Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
   peserta_didik, wali_murid, tahun_ajaran.

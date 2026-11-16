@@ -109,5 +109,12 @@ CLAUDE.md.
 
 - Tabel yang merujuk `tahun_ajaran` atau `semester` memakai
   `->constrained(...)->restrictOnDelete()`.
+- Setiap data yang dirujuk tabel lain dengan `restrictOnDelete` wajib
+  diperiksa pemakaiannya di Service sebelum dihapus. Penolakannya tampil
+  sebagai pesan yang menyebut apa yang memakainya dan berapa banyak, bukan
+  galat database. Contoh: `TahunAjaranService::delete()` menolak dengan
+  "Tahun ajaran 2026/2027 sudah dipakai oleh 2 rombel. Hapus rombelnya
+  dulu." Setiap kali tabel baru merujuk data yang sudah ada, tambahkan
+  pemeriksaan itu di Service pemilik data tersebut, beserta test-nya.
 - Tahun ajaran dan semester aktif dibaca lewat
   `App\Domains\Academic\Services\PeriodeAkademik`.

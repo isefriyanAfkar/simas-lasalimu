@@ -16,6 +16,11 @@ class PelanggaranAturanAkademik extends RuntimeException
         return new self('Tahun ajaran yang sedang aktif tidak boleh dihapus. Aktifkan tahun ajaran lain dulu.');
     }
 
+    public static function tahunAjaranDipakaiRombel(string $nama, int $jumlahRombel): self
+    {
+        return new self("Tahun ajaran {$nama} sudah dipakai oleh {$jumlahRombel} rombel. Hapus rombelnya dulu.");
+    }
+
     public static function semesterBukanMilikTahunAjaranAktif(): self
     {
         return new self('Semester hanya bisa diaktifkan kalau tahun ajarannya sedang aktif.');

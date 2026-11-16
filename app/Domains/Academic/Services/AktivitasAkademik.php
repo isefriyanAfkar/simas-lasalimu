@@ -4,6 +4,7 @@ namespace App\Domains\Academic\Services;
 
 use App\Domains\Academic\Enums\AksiAkademik;
 use App\Domains\Academic\Models\MataPelajaran;
+use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Models\User;
@@ -58,13 +59,14 @@ final class AktivitasAkademik
 
     /**
      * Short name as shown in the activity log: "TA 2026/2027",
-     * "Ganjil 2026/2027" or "MTK Matematika".
+     * "Ganjil 2026/2027", "MTK Matematika" or "X-1 2026/2027".
      */
-    public static function label(TahunAjaran|Semester|MataPelajaran $subject): string
+    public static function label(TahunAjaran|Semester|MataPelajaran|Rombel $subject): string
     {
         return match (true) {
             $subject instanceof TahunAjaran => "TA {$subject->nama}",
             $subject instanceof Semester => "{$subject->jenis->label()} {$subject->tahunAjaran->nama}",
+            $subject instanceof Rombel => "{$subject->nama} {$subject->tahunAjaran->nama}",
             default => "{$subject->kode} {$subject->nama}",
         };
     }
