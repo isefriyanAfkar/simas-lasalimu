@@ -3,9 +3,11 @@
 namespace App\Domains\Academic\Services;
 
 use App\Domains\Academic\Enums\AksiAkademik;
+use App\Domains\Academic\Models\MataPelajaran;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Models\User;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Explicit activity log entries for the academic services, so
@@ -40,13 +42,30 @@ final class AktivitasAkademik
     }
 
     /**
-     * Short name of a period as shown in the activity log: "TA 2026/2027" or
-     * "Ganjil 2026/2027".
+     * Log a status change in either direction (status_aktif old → new) for
+     * subjects that are simply switched on and off. Call it inside the
+     * writing transaction.
      */
-    public static function label(TahunAjaran|Semester $periode): string
+    public static function logStatusChange(AksiAkademik $aksi, User $pelaku, Model $subject, bool $aktif): void
     {
-        return $periode instanceof TahunAjaran
-            ? "TA {$periode->nama}"
-            : "{$periode->jenis->label()} {$periode->tahunAjaran->nama}";
+        activity(self::LOG_NAME)
+            ->causedBy($pelaku)
+            ->performedOn($subject)
+            ->event($aksi->value)
+            ->withChanges(['attributes' => ['status_aktif' => $aktif], 'old' => ['status_aktif' => ! $aktif]])
+            ->log($aksi->label());
+    }
+
+    /**
+     * Short name as shown in the activity log: "TA 2026/2027",
+     * "Ganjil 2026/2027" or "MTK Matematika".
+     */
+    public static function label(TahunAjaran|Semester|MataPelajaran $subject): string
+    {
+        return match (true) {
+            $subject instanceof TahunAjaran => "TA {$subject->nama}",
+            $subject instanceof Semester => "{$subject->jenis->label()} {$subject->tahunAjaran->nama}",
+            default => "{$subject->kode} {$subject->nama}",
+        };
     }
 }

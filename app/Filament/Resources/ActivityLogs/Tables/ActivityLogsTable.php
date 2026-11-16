@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ActivityLogs\Tables;
 
+use App\Domains\Academic\Models\MataPelajaran;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\AktivitasAkademik;
@@ -97,7 +98,7 @@ class ActivityLogsTable
             return $subject->username;
         }
 
-        if ($subject instanceof TahunAjaran || $subject instanceof Semester) {
+        if ($subject instanceof TahunAjaran || $subject instanceof Semester || $subject instanceof MataPelajaran) {
             return AktivitasAkademik::label($subject);
         }
 

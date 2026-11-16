@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament\Resources\ActivityLogs;
 
+use App\Domains\Academic\Services\MataPelajaranService;
 use App\Domains\Academic\Services\TahunAjaranService;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PengaturanSekolahService;
@@ -116,6 +117,21 @@ class ActivityLogResourceTest extends TestCase
         Livewire::test(ListActivityLogs::class)
             ->assertTableColumnStateSet('rincian', 'status_aktif: nonaktif → aktif; menggantikan TA 2025/2026', $tahunAjaranLog)
             ->assertTableColumnStateSet('rincian', 'status_aktif: nonaktif → aktif; menggantikan Genap 2025/2026', $semesterLog);
+    }
+
+    public function test_subject_status_entries_name_the_subject(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->actingAs($superAdmin);
+        $mataPelajaran = app(MataPelajaranService::class)->create(['kode' => 'MTK', 'nama' => 'Matematika']);
+        app(MataPelajaranService::class)->deactivate($superAdmin, $mataPelajaran);
+
+        $log = Activity::query()->where('event', 'mata_pelajaran_dinonaktifkan')->sole();
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'MTK Matematika', $log)
+            ->assertTableColumnFormattedStateSet('event', 'Mata pelajaran dinonaktifkan', $log)
+            ->assertTableColumnStateSet('rincian', 'status_aktif: aktif → nonaktif', $log);
     }
 
     public function test_entry_without_actor_is_shown_as_sistem(): void

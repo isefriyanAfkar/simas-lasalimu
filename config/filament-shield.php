@@ -4,6 +4,7 @@ declare(strict_types=1);
 use App\Domains\Foundation\Models\User;
 use App\Filament\Pages\KelolaPengaturanSekolah;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
+use App\Filament\Resources\MataPelajarans\MataPelajaranResource;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
 use App\Filament\Resources\Users\UserResource;
 use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
@@ -203,6 +204,7 @@ return [
             UserResource::class,
             ActivityLogResource::class,
             TahunAjaranResource::class,
+            MataPelajaranResource::class,
         ],
     ],
 
