@@ -48,6 +48,7 @@ Sebelum menulis rencana:
 - Baca CLAUDE.md, serta `.ai/rules` kalau folder itu ada.
 - Periksa kode yang akan disentuh. Jangan menebak struktur yang sudah ada.
 - Cek dokumentasi setiap paket yang API-nya akan dipakai (lihat tahap 2).
+- Untuk layar data master, baca dulu `references/pola-layar-master.md`.
 
 Isi rencana:
 - **Temuan dokumentasi:** versi, kompatibilitas, dan perbedaan dari versi lama
