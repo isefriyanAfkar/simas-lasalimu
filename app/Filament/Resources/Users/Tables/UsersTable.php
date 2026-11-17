@@ -15,12 +15,17 @@ use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The NIK is never a column and the search box never matches it: the search
  * term is bound to the page URL. Looking a user up by NIK is the "Cari NIK"
  * action on ListUsers.
+ *
+ * Student accounts (hundreds of them, managed on the Siswa screen) are
+ * hidden by default; the "Akun siswa" filter shows them.
  */
 class UsersTable
 {
@@ -51,6 +56,18 @@ class UsersTable
                     ->badge()
                     ->formatStateUsing(fn (bool $state): string => $state ? 'Aktif' : 'Nonaktif')
                     ->color(fn (bool $state): string => $state ? 'success' : 'gray'),
+            ])
+            ->filters([
+                TernaryFilter::make('akun_siswa')
+                    ->label('Akun siswa')
+                    ->placeholder('Semua akun')
+                    ->trueLabel('Hanya akun siswa')
+                    ->falseLabel('Tanpa akun siswa')
+                    ->default(false)
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereHas('siswa'),
+                        false: fn (Builder $query): Builder => $query->whereDoesntHave('siswa'),
+                    ),
             ])
             ->recordActions([
                 EditAction::make(),

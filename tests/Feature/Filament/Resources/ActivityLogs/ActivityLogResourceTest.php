@@ -11,8 +11,10 @@ use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
 use App\Domains\People\Services\PtkService;
+use App\Domains\People\Services\SiswaService;
 use App\Domains\People\Services\StatusKepegawaianService;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
@@ -437,5 +439,23 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnStateSet('objek', 'Dra. Hafida, S.Pd.', $log)
             ->assertTableColumnFormattedStateSet('event', 'Status guru/staf diubah', $log)
             ->assertTableColumnStateSet('rincian', 'status: aktif → pensiun; tanggal_keluar: 2026-01-31; keterangan_keluar: Pensiun usia', $log);
+    }
+
+    public function test_student_entries_name_the_student_and_the_nis(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $siswa = Siswa::factory()->for(User::factory()->state(['name' => 'Budi']))->create(['nis' => '20261001']);
+        app(SiswaService::class)->ubahStatus($superAdmin, $siswa, [
+            'status' => 'lulus',
+            'tanggal_keluar' => '2026-06-20',
+            'keterangan_keluar' => 'Lulus',
+        ]);
+        $log = Activity::query()->where('event', 'siswa_status_diubah')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'Budi (20261001)', $log)
+            ->assertTableColumnFormattedStateSet('event', 'Status siswa diubah', $log);
     }
 }

@@ -7,6 +7,7 @@ use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\MataPelajarans\MataPelajaranResource;
 use App\Filament\Resources\Ptks\PtkResource;
 use App\Filament\Resources\Rombels\RombelResource;
+use App\Filament\Resources\Siswas\SiswaResource;
 use App\Filament\Resources\StatusKepegawaians\StatusKepegawaianResource;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
 use App\Filament\Resources\Users\UserResource;
@@ -211,6 +212,7 @@ return [
             RombelResource::class,
             StatusKepegawaianResource::class,
             PtkResource::class,
+            SiswaResource::class,
         ],
     ],
 

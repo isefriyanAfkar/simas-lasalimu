@@ -227,12 +227,12 @@ class PtkForm
     }
 
     /**
-     * The account $userId when it has no staff record and the signed-in user
-     * may manage it, otherwise null.
+     * The account $userId when it has no staff record, is not a student
+     * account, and the signed-in user may manage it, otherwise null.
      */
     private static function linkableAccount(mixed $userId): ?User
     {
-        $user = filled($userId) ? User::query()->whereDoesntHave('ptk')->find($userId) : null;
+        $user = filled($userId) ? User::query()->whereDoesntHave('ptk')->whereDoesntHave('siswa')->find($userId) : null;
 
         /** @var User $pelaku */
         $pelaku = Filament::auth()->user();
@@ -241,7 +241,8 @@ class PtkForm
     }
 
     /**
-     * Accounts without a staff record that the signed-in user may manage.
+     * Accounts without a staff record, other than student accounts, that the
+     * signed-in user may manage.
      * The accounts a non super_admin may not manage are left out in the query
      * (before the limit), and canManage is checked again on the result.
      * % and _ in the search are matched literally.
@@ -258,6 +259,7 @@ class PtkForm
 
         return User::query()
             ->whereDoesntHave('ptk')
+            ->whereDoesntHave('siswa')
             ->when(! $pelaku->isSuperAdmin(), fn ($query) => $query
                 ->withoutRole(Peran::SuperAdmin->value)
                 ->where(fn ($query) => $query

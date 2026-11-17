@@ -9,6 +9,7 @@ use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\People\Enums\JenisPtk;
 use App\Domains\People\Enums\StatusPtk;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
 use App\Domains\People\Services\PtkService;
 use App\Domains\People\Services\StatusKepegawaianService;
@@ -394,6 +395,25 @@ class PtkServiceTest extends TestCase
 
         $this->assertSame(1, Ptk::query()->count());
         $this->assertSame(['guru'], $ptk->user->fresh()->getRoleNames()->all());
+    }
+
+    public function test_a_student_account_cannot_be_linked(): void
+    {
+        $siswa = Siswa::factory()->create();
+
+        try {
+            $this->service()->create(User::factory()->superAdmin()->create(), $this->data([
+                'akun' => 'ada',
+                'user_id' => $siswa->user_id,
+                'username' => $siswa->nis,
+            ]));
+            $this->fail('A student account was linked.');
+        } catch (ValidationException $exception) {
+            $this->assertSame([PtkService::PESAN_AKUN_SISWA], $exception->errors()['user_id']);
+        }
+
+        $this->assertSame(0, Ptk::query()->count());
+        $this->assertSame(['siswa'], $siswa->user->fresh()->getRoleNames()->all());
     }
 
     /**

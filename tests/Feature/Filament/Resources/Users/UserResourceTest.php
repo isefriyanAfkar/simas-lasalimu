@@ -6,6 +6,7 @@ use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
+use App\Domains\People\Models\Siswa;
 use App\Filament\Pages\Auth\Login;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
@@ -44,6 +45,24 @@ class UserResourceTest extends TestCase
         Livewire::test(ListUsers::class)
             ->assertOk()
             ->assertCanSeeTableRecords([$superAdmin, $operator]);
+    }
+
+    public function test_student_accounts_are_hidden_by_default_and_shown_by_the_filter(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $guru = User::factory()->create();
+        $siswa = Siswa::factory()->create();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListUsers::class)
+            ->assertCanSeeTableRecords([$superAdmin, $guru])
+            ->assertCanNotSeeTableRecords([$siswa->user])
+            ->filterTable('akun_siswa', true)
+            ->assertCanSeeTableRecords([$siswa->user])
+            ->assertCanNotSeeTableRecords([$superAdmin, $guru])
+            ->filterTable('akun_siswa', null)
+            ->assertCanSeeTableRecords([$superAdmin, $guru, $siswa->user]);
     }
 
     public function test_operator_without_user_permission_gets_403_on_the_user_list(): void

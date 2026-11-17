@@ -10,6 +10,7 @@ use App\Domains\Foundation\Policies\UserPolicy;
 use App\Domains\Foundation\Services\KunciNikTidakSiap;
 use App\Domains\Foundation\Services\PenjagaNik;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -132,6 +133,16 @@ class User extends Authenticatable implements FilamentUser
     public function ptk(): HasOne
     {
         return $this->hasOne(Ptk::class);
+    }
+
+    /**
+     * The student record of this account, if any. Its username is the NIS.
+     *
+     * @return HasOne<Siswa, $this>
+     */
+    public function siswa(): HasOne
+    {
+        return $this->hasOne(Siswa::class);
     }
 
     public function isSuperAdmin(): bool

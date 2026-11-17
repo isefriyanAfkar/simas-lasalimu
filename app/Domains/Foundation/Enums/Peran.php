@@ -7,7 +7,10 @@ namespace App\Domains\Foundation\Enums;
  * - panel roles (super_admin, operator) open the admin panel and are managed
  *   in Kelola Pengguna, at most one per user;
  * - staff roles (guru, tendik) follow the staff record (PTK), never open the
- *   admin panel, and are never touched by Kelola Pengguna.
+ *   admin panel, and are never touched by Kelola Pengguna;
+ * - the student role (siswa) follows the student record, never opens the
+ *   admin panel, and is never touched by Kelola Pengguna. Students will sign
+ *   in later through a panel of their own, with the NIS as username.
  */
 enum Peran: string
 {
@@ -15,6 +18,7 @@ enum Peran: string
     case Operator = 'operator';
     case Guru = 'guru';
     case Tendik = 'tendik';
+    case Siswa = 'siswa';
 
     public function label(): string
     {
@@ -23,14 +27,18 @@ enum Peran: string
             self::Operator => 'Operator',
             self::Guru => 'Guru',
             self::Tendik => 'Tendik',
+            self::Siswa => 'Siswa',
         };
     }
 
+    /**
+     * Whether the role opens the admin panel.
+     */
     public function aksesPanel(): bool
     {
         return match ($this) {
             self::SuperAdmin, self::Operator => true,
-            self::Guru, self::Tendik => false,
+            self::Guru, self::Tendik, self::Siswa => false,
         };
     }
 

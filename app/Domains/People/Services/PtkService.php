@@ -29,9 +29,10 @@ use Spatie\Activitylog\Support\CauserResolver;
  * included, with jenis_kelamin required.
  * - akun "baru" creates an active account without a panel role and with a
  *   random password that is never shown
- * - akun "ada" links an existing account that has no staff record yet and
- *   that the actor may manage (UserService::canManage), e.g. an operator who
- *   also teaches; its panel role stays
+ * - akun "ada" links an existing account that has no staff record yet, is
+ *   not a student account, and that the actor may manage
+ *   (UserService::canManage), e.g. an operator who also teaches; its panel
+ *   role stays
  * - the account gets the staff role of jenis_ptk (guru or tendik); changing
  *   jenis_ptk swaps it; other roles are never taken away
  *
@@ -58,6 +59,8 @@ use Spatie\Activitylog\Support\CauserResolver;
  */
 class PtkService
 {
+    public const string PESAN_AKUN_SISWA = 'Pengguna ini akun siswa dan tidak bisa dihubungkan sebagai guru/staf.';
+
     private const int ATTEMPTS = 3;
 
     /**
@@ -205,7 +208,7 @@ class PtkService
                 'status' => StatusPtk::from($validated['status']),
                 'tanggal_keluar' => $validated['tanggal_keluar'],
                 'keterangan_keluar' => $validated['keterangan_keluar'],
-                'log_penonaktifan_akun_id' => $this->userService->nonaktifkanKarenaStatusPtk($pelaku, $terkunci->user),
+                'log_penonaktifan_akun_id' => $this->userService->nonaktifkanKarenaStatusKeluar($pelaku, $terkunci->user),
             ]);
 
             $this->log(AksiKepegawaian::PtkStatusDiubah, $pelaku, $terkunci, [
@@ -224,7 +227,7 @@ class PtkService
     /**
      * Come back to aktif. The account is reactivated only when it is still
      * inactive because of the deactivation done by ubahStatus(); see
-     * UserService::aktifkanKembaliSetelahStatusPtk().
+     * UserService::aktifkanKembaliSetelahStatusKeluar().
      */
     public function aktifkanKembali(User $pelaku, Ptk $ptk): Ptk
     {
@@ -252,7 +255,7 @@ class PtkService
             ]);
 
             if ($logPenonaktifan !== null) {
-                $this->userService->aktifkanKembaliSetelahStatusPtk($pelaku, $terkunci->user, $logPenonaktifan);
+                $this->userService->aktifkanKembaliSetelahStatusKeluar($pelaku, $terkunci->user, $logPenonaktifan);
             }
 
             $this->log(AksiKepegawaian::PtkDiaktifkanKembali, $pelaku, $terkunci, [
@@ -285,6 +288,10 @@ class PtkService
 
         if ($ptkLain !== null) {
             return [null, "Pengguna ini sudah terdaftar sebagai guru/staf: {$ptkLain->nama_lengkap}."];
+        }
+
+        if ($user->siswa()->exists()) {
+            return [null, self::PESAN_AKUN_SISWA];
         }
 
         if (! $this->userService->canManage($pelaku, $user)) {

@@ -4,6 +4,7 @@ namespace Tests\Feature\Routes;
 
 use App\Domains\Foundation\Models\User;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -123,6 +124,26 @@ class FotoPenggunaTest extends TestCase
     {
         $user = $this->userWithPhoto();
         Ptk::factory()->for($user)->create();
+        $guru = User::factory()->create();
+        $guru->assignRole('guru');
+
+        $this->actingAs($guru)->get(route('pengguna.foto', $user))->assertForbidden();
+    }
+
+    public function test_someone_allowed_to_view_the_student_sees_the_student_photo(): void
+    {
+        $user = $this->userWithPhoto();
+        Siswa::factory()->for($user)->create();
+
+        $this->actingAs(User::factory()->operator()->create())
+            ->get(route('pengguna.foto', $user))
+            ->assertOk();
+    }
+
+    public function test_the_photo_of_a_student_stays_closed_to_someone_not_allowed_to_view_students(): void
+    {
+        $user = $this->userWithPhoto();
+        Siswa::factory()->for($user)->create();
         $guru = User::factory()->create();
         $guru->assignRole('guru');
 

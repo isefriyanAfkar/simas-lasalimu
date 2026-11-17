@@ -37,7 +37,10 @@ use Spatie\Activitylog\Models\Activity;
  * - a non super_admin cannot grant or take away the super_admin or operator role
  * - create() and update() manage only the panel role: peran is super_admin,
  *   operator, or null (no panel access), and the key must be sent. The staff
- *   roles guru and tendik are never added or removed here
+ *   roles guru and tendik and the student role siswa are never added or
+ *   removed here
+ * - the username of a student account is its NIS and only changes with the
+ *   NIS (SiswaService); update() rejects any other change
  *
  * create() and update() validate their input here (see validateAccountData),
  * whatever the caller already checked. Every save that checks username or
@@ -122,6 +125,8 @@ class UserService
     public const string PESAN_FOTO = 'Foto tidak valid. Unggah JPG, PNG, atau WebP paling besar 1 MB.';
 
     public const string PESAN_KUNCI_NIK = 'NIK belum bisa disimpan: kunci NIK belum diatur di server.';
+
+    public const string PESAN_USERNAME_SISWA = 'Username siswa mengikuti NIS. Ubah NIS di layar Siswa.';
 
     public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
@@ -232,6 +237,10 @@ class UserService
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data): User {
             $data = $this->validateAccountData($data, $user);
             $peran = $data['peran'] === null ? null : Peran::from($data['peran']);
+
+            if ($data['username'] !== $user->getOriginal('username') && $user->siswa()->exists()) {
+                throw ValidationException::withMessages(['username' => self::PESAN_USERNAME_SISWA]);
+            }
 
             // The rows are locked now: read the roles again instead of the
             // relation loaded with the page, which another save may have changed.
@@ -460,7 +469,20 @@ class UserService
      */
     public function validasiAkunPtk(array $data, ?User $user): void
     {
-        $this->validateAccountData($data, $user, akunPtk: true);
+        $this->validateAccountData($data, $user, akunTanpaPanel: true);
+    }
+
+    /**
+     * The same check as validasiAkunPtk() for the student form
+     * (SiswaService), whose username is the NIS.
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws ValidationException
+     */
+    public function validasiAkunSiswa(array $data, ?User $user): void
+    {
+        $this->validateAccountData($data, $user, akunTanpaPanel: true);
     }
 
     /**
@@ -480,66 +502,46 @@ class UserService
             throw new LogicException("{$peranPtk->value} is not a staff role.");
         }
 
-        if ($user !== null) {
-            $this->ensureCanManage($pelaku, $user);
-        }
-
-        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data, $peranPtk): User {
-            $data = $this->validateAccountData($data, $user, akunPtk: true);
-            $this->ensureCanGrantRole($pelaku, $peranPtk);
-
-            if ($user === null) {
-                $user = new User([
-                    'name' => $data['name'],
-                    'username' => $data['username'],
-                    'email' => $data['email'] ?? null,
-                    'password' => Str::password(32),
-                    'status_aktif' => true,
-                    ...Arr::only($data, self::BIODATA_FIELDS),
-                ]);
-                $this->applyNik($user, $data);
-                $user->save();
-                $user->assignRole($peranPtk->value);
-
-                $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
-                    'attributes' => [...$this->createdAttributes($user), 'peran' => null, 'peran_ptk' => $peranPtk->value],
-                ]);
-
-                return $user;
-            }
-
-            $before = $this->snapshot($user);
-            $nikHashBefore = $user->nik_hash;
-            $fotoBefore = $user->foto;
-
-            $user->fill([
-                'name' => $data['name'],
-                'username' => $data['username'],
-                'email' => $data['email'] ?? null,
-                ...Arr::only($data, self::BIODATA_FIELDS),
-            ]);
-            $this->applyNik($user, $data);
-            $user->save();
-
-            $changes = $this->diff($before, $this->snapshot($user), $this->markers($nikHashBefore, $user->nik_hash, $fotoBefore, $user->foto));
-            $this->deleteReplacedPhotoAfterCommit($fotoBefore, $user->foto);
-
-            if ($changes !== null) {
-                $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
-            }
-
-            $this->aturPeranPtk($pelaku, $user, $peranPtk);
-
-            return $user;
-        }, self::ATTEMPTS));
+        return $this->simpanAkunTanpaPanel(
+            $pelaku,
+            $user,
+            $data,
+            $peranPtk,
+            'peran_ptk',
+            fn (User $lama) => $this->aturPeranPtk($pelaku, $lama, $peranPtk),
+        );
     }
 
     /**
-     * Deactivate the account of a staff member who left (PtkService), unless
-     * it holds a panel role or is already inactive. Returns the id of the log
-     * entry of the deactivation, or null when the account was left alone.
+     * Create ($user null) or change the account of a student. The username
+     * is the NIS, set by SiswaService. A new account is active, holds only the
+     * siswa role (no admin panel access) and gets a random password that is
+     * never shown. Roles of an existing account are not touched. Must be
+     * called inside the student service's transaction.
+     *
+     * @param  array<string, mixed>  $data  name, username (the NIS), email, nik, hapus_nik and biodata
+     *
+     * @throws ValidationException
      */
-    public function nonaktifkanKarenaStatusPtk(User $pelaku, User $user): ?int
+    public function simpanAkunSiswa(User $pelaku, ?User $user, array $data): User
+    {
+        return $this->simpanAkunTanpaPanel(
+            $pelaku,
+            $user,
+            $data,
+            Peran::Siswa,
+            'peran_siswa',
+            fn (User $lama) => null,
+        );
+    }
+
+    /**
+     * Deactivate the account of a staff member or student who left
+     * (PtkService, SiswaService), unless it holds a panel role or is already
+     * inactive. Returns the id of the log entry of the deactivation, or null
+     * when the account was left alone.
+     */
+    public function nonaktifkanKarenaStatusKeluar(User $pelaku, User $user): ?int
     {
         $this->ensureCanManage($pelaku, $user);
 
@@ -557,12 +559,13 @@ class UserService
     }
 
     /**
-     * Reactivate the account of a staff member who comes back, but only when
-     * it is still inactive because of the deactivation logged as $logId: the
-     * latest status change of the account must be that entry. An account
-     * activated or deactivated in Kelola Pengguna afterwards is left alone.
+     * Reactivate the account of a staff member or student who comes back, but
+     * only when it is still inactive because of the deactivation logged as
+     * $logId: the latest status change of the account must be that entry. An
+     * account activated or deactivated in Kelola Pengguna afterwards is left
+     * alone.
      */
-    public function aktifkanKembaliSetelahStatusPtk(User $pelaku, User $user, int $logId): void
+    public function aktifkanKembaliSetelahStatusKeluar(User $pelaku, User $user, int $logId): void
     {
         $this->ensureCanManage($pelaku, $user);
 
@@ -737,7 +740,7 @@ class UserService
      *
      * @throws ValidationException
      */
-    private function validateAccountData(array $data, ?User $ignore, bool $akunPtk = false): array
+    private function validateAccountData(array $data, ?User $ignore, bool $akunTanpaPanel = false): array
     {
         $this->lockUsers();
 
@@ -755,7 +758,7 @@ class UserService
             $biodata['hapus_nik'] = $data['hapus_nik'];
         }
 
-        if ($akunPtk) {
+        if ($akunTanpaPanel) {
             $biodata['jenis_kelamin'] ??= null;
         }
 
@@ -766,13 +769,13 @@ class UserService
             ...Arr::only($this->biodataRules($ignore), array_keys($biodata)),
         ];
 
-        if ($akunPtk) {
+        if ($akunTanpaPanel) {
             $rules['jenis_kelamin'] = ['required', Rule::enum(JenisKelamin::class)];
         } else {
             $rules['peran'] = ['present', 'nullable', 'string', Rule::in(Peran::nilaiPanel())];
         }
 
-        if ($ignore === null && ! $akunPtk) {
+        if ($ignore === null && ! $akunTanpaPanel) {
             $rules['password'] = self::passwordRules();
         }
 
@@ -1030,6 +1033,73 @@ class UserService
         return str_starts_with($path, self::FOTO_DIRECTORY.'/')
             && ! str_contains($path, '..')
             && ! str_contains($path, '\\');
+    }
+
+    /**
+     * Shared by simpanAkunPtk() and simpanAkunSiswa(): an account without a
+     * panel role. A new account gets the role $peran, logged in the "dibuat"
+     * entry under $kunciLogPeran; $aturPeran adjusts the roles of an existing
+     * account.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  Closure(User): mixed  $aturPeran
+     *
+     * @throws ValidationException
+     */
+    private function simpanAkunTanpaPanel(User $pelaku, ?User $user, array $data, Peran $peran, string $kunciLogPeran, Closure $aturPeran): User
+    {
+        if ($user !== null) {
+            $this->ensureCanManage($pelaku, $user);
+        }
+
+        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data, $peran, $kunciLogPeran, $aturPeran): User {
+            $data = $this->validateAccountData($data, $user, akunTanpaPanel: true);
+            $this->ensureCanGrantRole($pelaku, $peran);
+
+            if ($user === null) {
+                $user = new User([
+                    'name' => $data['name'],
+                    'username' => $data['username'],
+                    'email' => $data['email'] ?? null,
+                    'password' => Str::password(32),
+                    'status_aktif' => true,
+                    ...Arr::only($data, self::BIODATA_FIELDS),
+                ]);
+                $this->applyNik($user, $data);
+                $user->save();
+                $user->assignRole($peran->value);
+
+                $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
+                    'attributes' => [...$this->createdAttributes($user), 'peran' => null, $kunciLogPeran => $peran->value],
+                ]);
+
+                return $user;
+            }
+
+            $before = $this->snapshot($user);
+            $nikHashBefore = $user->nik_hash;
+            $fotoBefore = $user->foto;
+
+            $user->fill([
+                'name' => $data['name'],
+                'username' => $data['username'],
+                'email' => $data['email'] ?? null,
+                ...Arr::only($data, self::BIODATA_FIELDS),
+            ]);
+            $this->applyNik($user, $data);
+            $user->save();
+
+            $changes = $this->diff($before, $this->snapshot($user), $this->markers($nikHashBefore, $user->nik_hash, $fotoBefore, $user->foto));
+            $this->deleteReplacedPhotoAfterCommit($fotoBefore, $user->foto);
+
+            if ($changes !== null) {
+                $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
+            }
+
+            $aturPeran($user);
+
+            return $user;
+        }, self::ATTEMPTS));
     }
 
     /**

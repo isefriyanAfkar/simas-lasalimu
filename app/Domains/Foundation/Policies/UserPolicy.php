@@ -62,10 +62,11 @@ class UserPolicy
 
     /**
      * See the user's photo (pengguna.foto route): always one's own, otherwise
-     * whoever may view that user, or that user's staff record. An account
-     * without a staff record may also be seen by whoever may link it on the
-     * Guru dan Staf form: allowed to create staff and to manage the account
-     * (operators cannot view users, but the form shows the photo).
+     * whoever may view that user, or that user's staff or student record. An
+     * account without a staff or student record may also be seen by whoever
+     * may link it on the Guru dan Staf form: allowed to create staff and to
+     * manage the account (operators cannot view users, but the form shows the
+     * photo).
      */
     public function viewFoto(User $authUser, User $user): bool
     {
@@ -77,6 +78,12 @@ class UserPolicy
 
         if ($ptk !== null) {
             return $authUser->can('view', $ptk);
+        }
+
+        $siswa = $user->siswa;
+
+        if ($siswa !== null) {
+            return $authUser->can('view', $siswa);
         }
 
         return $authUser->can('create', Ptk::class) && $this->userService->canManage($authUser, $user);

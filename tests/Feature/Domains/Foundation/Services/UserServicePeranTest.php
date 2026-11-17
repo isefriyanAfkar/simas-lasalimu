@@ -32,10 +32,10 @@ class UserServicePeranTest extends TestCase
         $this->seed(PeranDanIzinSeeder::class);
     }
 
-    public function test_the_seeder_creates_the_guru_and_tendik_roles(): void
+    public function test_the_seeder_creates_the_guru_tendik_and_siswa_roles(): void
     {
         $this->assertEqualsCanonicalizing(
-            ['super_admin', 'operator', 'guru', 'tendik'],
+            ['super_admin', 'operator', 'guru', 'tendik', 'siswa'],
             Role::query()->pluck('name')->all(),
         );
     }

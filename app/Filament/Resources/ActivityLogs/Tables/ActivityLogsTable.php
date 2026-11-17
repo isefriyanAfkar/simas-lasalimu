@@ -11,6 +11,7 @@ use App\Domains\Academic\Services\AktivitasAkademik;
 use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Models\User;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
@@ -48,7 +49,7 @@ class ActivityLogsTable
                 'causer',
                 'subject' => function (Relation $relation): void {
                     if ($relation instanceof MorphTo) {
-                        $relation->morphWith([Semester::class => ['tahunAjaran'], Rombel::class => ['tahunAjaran'], Ptk::class => ['user']]);
+                        $relation->morphWith([Semester::class => ['tahunAjaran'], Rombel::class => ['tahunAjaran'], Ptk::class => ['user'], Siswa::class => ['user']]);
                     }
                 },
             ]))
@@ -123,6 +124,10 @@ class ActivityLogsTable
 
         if ($subject instanceof StatusKepegawaian) {
             return $subject->nama;
+        }
+
+        if ($subject instanceof Siswa) {
+            return "{$subject->user->name} ({$subject->nis})";
         }
 
         if ($subject instanceof Ptk) {

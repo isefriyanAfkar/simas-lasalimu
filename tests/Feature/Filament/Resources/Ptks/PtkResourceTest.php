@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament\Resources\Ptks;
 use App\Domains\Foundation\Models\User;
 use App\Domains\People\Enums\StatusPtk;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
 use App\Domains\People\Services\StatusKepegawaianService;
 use App\Filament\Resources\Ptks\Pages\CreatePtk;
@@ -202,10 +203,23 @@ class PtkResourceTest extends TestCase
         User::factory()->operator()->create(['name' => 'Sari Operator']);
         User::factory()->superAdmin()->create(['name' => 'Sari Admin']);
         Ptk::factory()->for(User::factory()->state(['name' => 'Sari Guru']))->create();
+        Siswa::factory()->for(User::factory()->state(['name' => 'Sari Siswa']))->create();
 
         Livewire::test(CreatePtk::class)
             ->fillForm(['akun' => 'ada'])
             ->assertFormFieldExists('user_id', fn (Select $field): bool => array_values($field->getSearchResults('Sari')) === ['Sari Bebas (sari)']);
+    }
+
+    public function test_a_chosen_student_account_fills_nothing_and_shows_no_label(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $siswa = Siswa::factory()->for(User::factory()->state(['name' => 'Budi Siswa', 'tempat_lahir' => 'Kendari']))->create();
+
+        Livewire::test(CreatePtk::class)
+            ->fillForm(['akun' => 'ada'])
+            ->fillForm(['user_id' => $siswa->user_id])
+            ->assertSchemaStateSet(['name' => null, 'tempat_lahir' => null])
+            ->assertFormFieldExists('user_id', fn (Select $field): bool => $field->getOptionLabel(withDefault: false) === null);
     }
 
     public function test_an_inactive_employment_status_is_not_offered_for_a_new_staff_member(): void
