@@ -204,7 +204,7 @@ class UserService
             $this->applyNik($user, $data);
             $user->save();
 
-            $this->aturPeranPanel($user, null, $peran);
+            $this->aturPeranPanel($user, $peran);
 
             $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
                 'attributes' => [...$this->createdAttributes($user), 'peran' => $peran?->value],
@@ -229,14 +229,21 @@ class UserService
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data): User {
             $data = $this->validateAccountData($data, $user);
             $peran = $data['peran'] === null ? null : Peran::from($data['peran']);
-            $peranLama = $user->peranPanel();
 
-            if ($peran !== $peranLama && $peran !== null) {
+            // The rows are locked now: read the roles again instead of the
+            // relation loaded with the page, which another save may have changed.
+            $user->unsetRelation('roles');
+            $peranLama = $user->peranPanel();
+            $semuaPeranPanelLama = $user->semuaPeranPanel();
+
+            if ($peran !== null && ! in_array($peran, $semuaPeranPanelLama, true)) {
                 $this->ensureCanGrantRole($pelaku, $peran);
             }
 
-            if ($peran !== $peranLama && $peranLama !== null && ! $this->canGrantRole($pelaku, $peranLama)) {
-                throw PelanggaranAturanPengguna::tidakBolehMencabutPeran($peranLama->value);
+            foreach ($semuaPeranPanelLama as $lama) {
+                if ($lama !== $peran && ! $this->canGrantRole($pelaku, $lama)) {
+                    throw PelanggaranAturanPengguna::tidakBolehMencabutPeran($lama->value);
+                }
             }
 
             if ($peran !== Peran::SuperAdmin) {
@@ -256,7 +263,8 @@ class UserService
             $this->applyNik($user, $data);
             $user->save();
 
-            $this->aturPeranPanel($user, $peranLama, $peran);
+            $peranPanelBerubah = $semuaPeranPanelLama !== ($peran === null ? [] : [$peran]);
+            $this->aturPeranPanel($user, $peran);
 
             $changes = $this->diff($before, $this->snapshot($user), $this->markers($nikHashBefore, $user->nik_hash, $fotoBefore, $user->foto));
             $this->deleteReplacedPhotoAfterCommit($fotoBefore, $user->foto);
@@ -265,7 +273,7 @@ class UserService
                 $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
             }
 
-            if ($peranLama !== $peran) {
+            if ($peranPanelBerubah) {
                 $this->log(AksiPengguna::RoleBerubah, $pelaku, $user, [
                     'attributes' => ['peran' => $peran?->value],
                     'old' => ['peran' => $peranLama?->value],
@@ -873,27 +881,26 @@ class UserService
     }
 
     /**
-     * Must run inside a transaction, before a username/email unique check,
-     * so two concurrent saves are serialized instead of both passing it.
+     * Leave $baru as the only panel role (none when null), also when the
+     * user held both panel roles. Staff roles (guru, tendik) stay untouched.
      */
-    /**
-     * Swap the panel role only: staff roles (guru, tendik) stay untouched.
-     */
-    private function aturPeranPanel(User $user, ?Peran $lama, ?Peran $baru): void
+    private function aturPeranPanel(User $user, ?Peran $baru): void
     {
-        if ($lama === $baru) {
-            return;
+        foreach (Peran::peranPanel() as $peran) {
+            if ($peran !== $baru && $user->hasRole($peran->value)) {
+                $user->removeRole($peran->value);
+            }
         }
 
-        if ($lama !== null) {
-            $user->removeRole($lama->value);
-        }
-
-        if ($baru !== null) {
+        if ($baru !== null && ! $user->hasRole($baru->value)) {
             $user->assignRole($baru->value);
         }
     }
 
+    /**
+     * Must run inside a transaction, before a username/email unique check,
+     * so two concurrent saves are serialized instead of both passing it.
+     */
     private function lockUsers(): void
     {
         User::query()->lockForUpdate()->get(['id']);

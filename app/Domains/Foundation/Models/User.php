@@ -70,19 +70,27 @@ class User extends Authenticatable implements FilamentUser
 
     /**
      * The panel role (super_admin or operator), or null when the user has
-     * none. Staff roles (guru, tendik) are ignored.
+     * none. Staff roles (guru, tendik) are ignored. Kelola Pengguna keeps at
+     * most one; for older data holding both, super_admin is the one shown.
      */
     public function peranPanel(): ?Peran
     {
-        foreach ($this->getRoleNames() as $nama) {
-            $peran = Peran::tryFrom($nama);
+        return $this->semuaPeranPanel()[0] ?? null;
+    }
 
-            if ($peran?->aksesPanel()) {
-                return $peran;
-            }
-        }
+    /**
+     * Every panel role the user holds, super_admin first.
+     *
+     * @return list<Peran>
+     */
+    public function semuaPeranPanel(): array
+    {
+        $namaPeran = $this->getRoleNames()->all();
 
-        return null;
+        return array_values(array_filter(
+            Peran::peranPanel(),
+            fn (Peran $peran): bool => in_array($peran->value, $namaPeran, true),
+        ));
     }
 
     /**

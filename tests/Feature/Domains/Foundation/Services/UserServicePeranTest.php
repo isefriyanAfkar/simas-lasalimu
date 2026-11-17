@@ -205,6 +205,92 @@ class UserServicePeranTest extends TestCase
         $this->assertNull($guru->fresh()->peranPanel());
     }
 
+    public function test_operator_may_create_a_user_without_panel_access(): void
+    {
+        $operator = User::factory()->operator()->create();
+
+        $user = $this->service()->create($operator, [
+            'name' => 'Budi Santoso',
+            'username' => 'budi',
+            'password' => 'rahasia-baru-123',
+            'peran' => null,
+        ]);
+
+        $this->assertCount(0, $user->fresh()->roles);
+        $log = Activity::query()->where('event', 'dibuat')->sole();
+        $this->assertTrue($log->causer->is($operator));
+        $this->assertNull($log->attribute_changes['attributes']['peran']);
+    }
+
+    public function test_the_panel_role_of_a_user_holding_both_is_super_admin(): void
+    {
+        $user = User::factory()->create();
+        $user->assignRole([Peran::Operator->value, Peran::SuperAdmin->value]);
+
+        $this->assertSame(Peran::SuperAdmin, $user->fresh()->peranPanel());
+    }
+
+    public function test_removing_panel_access_from_a_user_holding_both_panel_roles_removes_both(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = User::factory()->create();
+        $user->assignRole([Peran::Operator->value, Peran::SuperAdmin->value, Peran::Guru->value]);
+
+        $this->service()->update($superAdmin, $user->fresh(), $this->updateData($user, null));
+
+        $user = $user->fresh();
+        $this->assertSame(['guru'], $user->getRoleNames()->all());
+        $this->assertFalse($user->canAccessPanel(Filament::getPanel('admin')));
+        $log = Activity::query()->where('event', 'role_berubah')->sole();
+        $this->assertSame(['peran' => null], $log->attribute_changes['attributes']);
+        $this->assertSame(['peran' => 'super_admin'], $log->attribute_changes['old']);
+    }
+
+    public function test_choosing_one_panel_role_for_a_user_holding_both_leaves_only_that_one(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = User::factory()->create();
+        $user->assignRole([Peran::SuperAdmin->value, Peran::Operator->value]);
+
+        $this->service()->update($superAdmin, $user->fresh(), $this->updateData($user, Peran::Operator->value));
+
+        $this->assertSame(['operator'], $user->fresh()->getRoleNames()->all());
+        $log = Activity::query()->where('event', 'role_berubah')->sole();
+        $this->assertSame(['peran' => 'operator'], $log->attribute_changes['attributes']);
+        $this->assertSame(['peran' => 'super_admin'], $log->attribute_changes['old']);
+    }
+
+    public function test_the_last_super_admin_also_holding_operator_may_save_without_a_role_change(): void
+    {
+        $superAdmin = User::factory()->create();
+        $superAdmin->assignRole([Peran::Operator->value, Peran::SuperAdmin->value]);
+        $superAdmin = $superAdmin->fresh();
+
+        $this->service()->update($superAdmin, $superAdmin, [...$this->updateData($superAdmin, Peran::SuperAdmin->value), 'name' => 'Nama Baru']);
+
+        $this->assertSame(['super_admin'], $superAdmin->fresh()->getRoleNames()->all());
+        $this->assertSame('Nama Baru', $superAdmin->fresh()->name);
+    }
+
+    /**
+     * Another super_admin changed the role between this page's load and its
+     * save: the role is read again after the user rows are locked.
+     */
+    public function test_the_current_role_is_read_after_the_lock_not_from_the_loaded_relation(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = User::factory()->operator()->create();
+        $dimuat = $user->fresh()->load('roles');
+
+        $user->fresh()->syncRoles([Peran::SuperAdmin->value]);
+
+        $this->service()->update($superAdmin, $dimuat, $this->updateData($user, null));
+
+        $this->assertCount(0, $user->fresh()->roles);
+        $log = Activity::query()->where('event', 'role_berubah')->sole();
+        $this->assertSame(['peran' => 'super_admin'], $log->attribute_changes['old']);
+    }
+
     #[DataProvider('ptkRoles')]
     public function test_a_guru_or_tendik_only_account_may_not_enter_the_panel(Peran $peranPtk): void
     {
