@@ -6,6 +6,7 @@ use App\Domains\Foundation\Enums\JenisKelamin;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
+use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\JenisPtk;
 use App\Domains\People\Enums\StatusPtk;
 use App\Domains\People\Models\Ptk;
@@ -21,6 +22,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
 use Spatie\Permission\Models\Role;
@@ -99,6 +101,29 @@ class PtkServiceTest extends TestCase
         $this->assertFalse(password_verify('', $pertama->getAuthPassword()));
         $this->assertFalse(password_verify('password', $pertama->getAuthPassword()));
         $this->assertFalse(password_verify('satu', $pertama->getAuthPassword()));
+    }
+
+    /**
+     * Guru, tendik and siswa hold no panel access, so canGrantRole() never
+     * refuses them today. The stub proves the check is still consulted on
+     * this path and that a refusal leaves nothing behind.
+     */
+    public function test_the_staff_role_goes_through_the_grant_check(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $this->partialMock(UserService::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('canGrantRole')
+            ->andReturnUsing(fn (User $pelaku, Peran $peran): bool => $peran !== Peran::Guru));
+
+        try {
+            $this->service()->create($operator, $this->data());
+            $this->fail('A refused role was granted.');
+        } catch (PelanggaranAturanPengguna $exception) {
+            $this->assertSame(PelanggaranAturanPengguna::tidakBolehMemberiPeran('guru')->getMessage(), $exception->getMessage());
+        }
+
+        $this->assertSame(0, Ptk::query()->count());
+        $this->assertDatabaseMissing('users', ['username' => 'hafida']);
     }
 
     public function test_a_tendik_gets_the_tendik_role(): void

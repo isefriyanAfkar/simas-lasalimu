@@ -3,7 +3,9 @@
 namespace Tests\Feature\Domains\People\Services;
 
 use App\Domains\Foundation\Enums\JenisKelamin;
+use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\StatusSiswa;
 use App\Domains\People\Models\Siswa;
@@ -14,6 +16,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
@@ -74,6 +77,29 @@ class SiswaServiceTest extends TestCase
         $siswa = $this->service()->create(User::factory()->operator()->create(), $this->data(['username' => 'budi']));
 
         $this->assertSame('20261001', $siswa->user->fresh()->username);
+    }
+
+    /**
+     * Guru, tendik and siswa hold no panel access, so canGrantRole() never
+     * refuses them today. The stub proves the check is still consulted on
+     * this path and that a refusal leaves nothing behind.
+     */
+    public function test_the_student_role_goes_through_the_grant_check(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $this->partialMock(UserService::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('canGrantRole')
+            ->andReturnUsing(fn (User $pelaku, Peran $peran): bool => $peran !== Peran::Siswa));
+
+        try {
+            $this->service()->create($operator, $this->data());
+            $this->fail('A refused role was granted.');
+        } catch (PelanggaranAturanPengguna $exception) {
+            $this->assertSame(PelanggaranAturanPengguna::tidakBolehMemberiPeran('siswa')->getMessage(), $exception->getMessage());
+        }
+
+        $this->assertSame(0, Siswa::query()->count());
+        $this->assertDatabaseMissing('users', ['username' => '20261001']);
     }
 
     public function test_a_new_account_gets_a_random_password_that_is_never_returned(): void
