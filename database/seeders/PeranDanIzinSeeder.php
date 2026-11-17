@@ -9,7 +9,9 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
- * Creates the panel roles and their permissions. Safe to run repeatedly.
+ * Creates every role (the panel roles super_admin and operator, and the staff
+ * roles guru and tendik, which hold no permission and never open the panel)
+ * and the permissions. Safe to run repeatedly.
  * The operator role deliberately receives no User permission for now except
  * ViewNik:User, every TahunAjaran and Rombel permission except Delete, and
  * every MataPelajaran permission.
@@ -64,6 +66,19 @@ class PeranDanIzinSeeder extends Seeder
     ];
 
     /**
+     * Given to no role: the Status Kepegawaian screen is for the super_admin
+     * only (Gate::before). No Delete: a status is only deactivated (Update).
+     *
+     * @var list<string>
+     */
+    public const array STATUS_KEPEGAWAIAN_PERMISSIONS = [
+        'ViewAny:StatusKepegawaian',
+        'View:StatusKepegawaian',
+        'Create:StatusKepegawaian',
+        'Update:StatusKepegawaian',
+    ];
+
+    /**
      * Permissions the operator role holds. Deleting a school year or a rombel
      * is left to the super_admin. ViewNik:User (reveal a NIK in full, logged)
      * has no screen for operators yet: it is for the future staff and student
@@ -92,7 +107,7 @@ class PeranDanIzinSeeder extends Seeder
             Role::findOrCreate($peran->value, 'web');
         }
 
-        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS] as $permission) {
+        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS, ...self::STATUS_KEPEGAWAIAN_PERMISSIONS] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 

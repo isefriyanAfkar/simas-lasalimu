@@ -65,7 +65,24 @@ class User extends Authenticatable implements FilamentUser
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return $this->status_aktif && $this->hasAnyRole([Peran::SuperAdmin->value, Peran::Operator->value]);
+        return $this->status_aktif && $this->hasAnyRole(Peran::nilaiPanel());
+    }
+
+    /**
+     * The panel role (super_admin or operator), or null when the user has
+     * none. Staff roles (guru, tendik) are ignored.
+     */
+    public function peranPanel(): ?Peran
+    {
+        foreach ($this->getRoleNames() as $nama) {
+            $peran = Peran::tryFrom($nama);
+
+            if ($peran?->aksesPanel()) {
+                return $peran;
+            }
+        }
+
+        return null;
     }
 
     /**

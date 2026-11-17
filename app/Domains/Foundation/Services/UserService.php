@@ -31,7 +31,10 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  * - the last active super_admin cannot be deactivated or lose the super_admin role
  * - a non super_admin cannot change, (de)activate or reset the password of a
  *   super_admin or of another operator
- * - a non super_admin cannot grant the super_admin or operator role
+ * - a non super_admin cannot grant or take away the super_admin or operator role
+ * - create() and update() manage only the panel role: peran is super_admin,
+ *   operator, or null (no panel access), and the key must be sent. The staff
+ *   roles guru and tendik are never added or removed here
  *
  * create() and update() validate their input here (see validateAccountData),
  * whatever the caller already checked. Every save that checks username or
@@ -176,7 +179,7 @@ class UserService
      * the actor sees those usernames anyway. update() checks whether the actor
      * may manage the user first, since there the target already exists.
      *
-     * @param  array{name: string, username: string, email?: string|null, password: string, peran: string, nik?: string|null, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null}  $data
+     * @param  array{name: string, username: string, email?: string|null, password: string, peran: string|null, nik?: string|null, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null}  $data
      *
      * @throws ValidationException
      */
@@ -184,9 +187,11 @@ class UserService
     {
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $data): User {
             $data = $this->validateAccountData($data, null);
-            $peran = Peran::from($data['peran']);
+            $peran = $data['peran'] === null ? null : Peran::from($data['peran']);
 
-            $this->ensureCanGrantRole($pelaku, $peran);
+            if ($peran !== null) {
+                $this->ensureCanGrantRole($pelaku, $peran);
+            }
 
             $user = new User([
                 'name' => $data['name'],
@@ -199,10 +204,10 @@ class UserService
             $this->applyNik($user, $data);
             $user->save();
 
-            $user->syncRoles([$peran->value]);
+            $this->aturPeranPanel($user, null, $peran);
 
             $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
-                'attributes' => [...$this->createdAttributes($user), 'peran' => $peran->value],
+                'attributes' => [...$this->createdAttributes($user), 'peran' => $peran?->value],
             ]);
 
             return $user;
@@ -213,7 +218,7 @@ class UserService
      * Biodata keys that are not sent keep their stored value; an empty nik
      * keeps the stored NIK and hapus_nik clears it.
      *
-     * @param  array{name: string, username: string, email?: string|null, peran: string, nik?: string|null, hapus_nik?: bool, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null}  $data
+     * @param  array{name: string, username: string, email?: string|null, peran: string|null, nik?: string|null, hapus_nik?: bool, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null}  $data
      *
      * @throws ValidationException
      */
@@ -223,10 +228,15 @@ class UserService
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data): User {
             $data = $this->validateAccountData($data, $user);
-            $peran = Peran::from($data['peran']);
+            $peran = $data['peran'] === null ? null : Peran::from($data['peran']);
+            $peranLama = $user->peranPanel();
 
-            if (! $user->hasRole($peran->value)) {
+            if ($peran !== $peranLama && $peran !== null) {
                 $this->ensureCanGrantRole($pelaku, $peran);
+            }
+
+            if ($peran !== $peranLama && $peranLama !== null && ! $this->canGrantRole($pelaku, $peranLama)) {
+                throw PelanggaranAturanPengguna::tidakBolehMencabutPeran($peranLama->value);
             }
 
             if ($peran !== Peran::SuperAdmin) {
@@ -236,7 +246,6 @@ class UserService
             $before = $this->snapshot($user);
             $nikHashBefore = $user->nik_hash;
             $fotoBefore = $user->foto;
-            $roleBefore = $user->getRoleNames()->first();
 
             $user->fill([
                 'name' => $data['name'],
@@ -247,7 +256,7 @@ class UserService
             $this->applyNik($user, $data);
             $user->save();
 
-            $user->syncRoles([$peran->value]);
+            $this->aturPeranPanel($user, $peranLama, $peran);
 
             $changes = $this->diff($before, $this->snapshot($user), $this->markers($nikHashBefore, $user->nik_hash, $fotoBefore, $user->foto));
             $this->deleteReplacedPhotoAfterCommit($fotoBefore, $user->foto);
@@ -256,10 +265,10 @@ class UserService
                 $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
             }
 
-            if ($roleBefore !== $peran->value) {
+            if ($peranLama !== $peran) {
                 $this->log(AksiPengguna::RoleBerubah, $pelaku, $user, [
-                    'attributes' => ['peran' => $peran->value],
-                    'old' => ['peran' => $roleBefore],
+                    'attributes' => ['peran' => $peran?->value],
+                    'old' => ['peran' => $peranLama?->value],
                 ]);
             }
 
@@ -538,9 +547,14 @@ class UserService
         return ! ($user->hasRole(Peran::Operator->value) && ! $pelaku->is($user));
     }
 
+    /**
+     * Panel roles are granted (and taken away) only by a super_admin. The
+     * staff roles guru and tendik may be granted by anyone allowed to manage
+     * the user; that check belongs to the caller.
+     */
     public function canGrantRole(User $pelaku, Peran $peran): bool
     {
-        return $pelaku->isSuperAdmin();
+        return ! $peran->aksesPanel() || $pelaku->isSuperAdmin();
     }
 
     /**
@@ -549,7 +563,7 @@ class UserService
     public function grantableRoleOptions(User $pelaku): array
     {
         return array_filter(
-            Peran::options(),
+            Peran::opsiPanel(),
             fn (string $value): bool => $this->canGrantRole($pelaku, Peran::from($value)),
             ARRAY_FILTER_USE_KEY,
         );
@@ -568,7 +582,7 @@ class UserService
      * are returned; nik is returned only when filled.
      *
      * @param  array<string, mixed>  $data
-     * @return array{name: string, username: string, email: string|null, peran: string, password?: string, nik?: string, hapus_nik?: bool, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null}
+     * @return array{name: string, username: string, email: string|null, peran: string|null, password?: string, nik?: string, hapus_nik?: bool, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null}
      *
      * @throws ValidationException
      */
@@ -594,7 +608,7 @@ class UserService
             'name' => ['required', 'string', 'max:255'],
             'username' => self::usernameRules($ignore),
             'email' => self::emailRules($ignore),
-            'peran' => ['required', Rule::enum(Peran::class)],
+            'peran' => ['present', 'nullable', 'string', Rule::in(Peran::nilaiPanel())],
             ...Arr::only($this->biodataRules($ignore), array_keys($biodata)),
         ];
 
@@ -621,7 +635,7 @@ class UserService
             }
         });
 
-        /** @var array{name: string, username: string, email?: string|null, peran: string, password?: string, nik?: string|null, hapus_nik?: bool|string|int, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null} $validated */
+        /** @var array{name: string, username: string, email?: string|null, peran: string|null, password?: string, nik?: string|null, hapus_nik?: bool|string|int, jenis_kelamin?: string|null, tempat_lahir?: string|null, tanggal_lahir?: string|null, agama?: string|null, alamat?: string|null, no_hp?: string|null, foto?: string|null} $validated */
         $validated = $validator->validate();
 
         if (array_key_exists('hapus_nik', $validated)) {
@@ -862,6 +876,24 @@ class UserService
      * Must run inside a transaction, before a username/email unique check,
      * so two concurrent saves are serialized instead of both passing it.
      */
+    /**
+     * Swap the panel role only: staff roles (guru, tendik) stay untouched.
+     */
+    private function aturPeranPanel(User $user, ?Peran $lama, ?Peran $baru): void
+    {
+        if ($lama === $baru) {
+            return;
+        }
+
+        if ($lama !== null) {
+            $user->removeRole($lama->value);
+        }
+
+        if ($baru !== null) {
+            $user->assignRole($baru->value);
+        }
+    }
+
     private function lockUsers(): void
     {
         User::query()->lockForUpdate()->get(['id']);

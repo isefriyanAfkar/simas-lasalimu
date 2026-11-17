@@ -10,6 +10,8 @@ use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
+use App\Domains\People\Models\StatusKepegawaian;
+use App\Domains\People\Services\StatusKepegawaianService;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
 use Database\Seeders\PeranDanIzinSeeder;
@@ -379,5 +381,38 @@ class ActivityLogResourceTest extends TestCase
             ->assertActionDoesNotExist(TestAction::make('delete')->table()->bulk());
 
         $this->assertSame(['index'], array_keys(ActivityLogResource::getPages()));
+    }
+
+    public function test_a_removed_panel_role_shows_as_no_panel_access(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $operator = User::factory()->operator()->create();
+        app(UserService::class)->update($superAdmin, $operator, [
+            'name' => $operator->name,
+            'username' => $operator->username,
+            'email' => $operator->email,
+            'peran' => null,
+        ]);
+        $log = Activity::query()->where('event', 'role_berubah')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('rincian', 'peran: operator → tanpa akses panel', $log);
+    }
+
+    public function test_employment_status_entries_name_the_status(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $gtt = StatusKepegawaian::query()->where('nama', 'GTT')->sole();
+        app(StatusKepegawaianService::class)->deactivate($superAdmin, $gtt);
+        $log = Activity::query()->where('event', 'status_kepegawaian_dinonaktifkan')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'GTT', $log)
+            ->assertTableColumnFormattedStateSet('event', 'Status kepegawaian dinonaktifkan', $log)
+            ->assertTableColumnStateSet('rincian', 'status_aktif: aktif → nonaktif', $log);
     }
 }

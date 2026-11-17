@@ -14,6 +14,7 @@ use App\Filament\Resources\Users\UserResource;
 use Database\Seeders\PeranDanIzinSeeder;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -294,5 +295,54 @@ class UserResourceTest extends TestCase
             ->assertActionHidden(TestAction::make('edit')->table($superAdmin))
             ->assertActionHidden(TestAction::make('nonaktifkan')->table($superAdmin))
             ->assertActionHidden(TestAction::make('aturUlangKataSandi')->table($superAdmin));
+    }
+
+    public function test_edit_form_shows_the_panel_role_of_a_guru_operator_and_saving_keeps_guru(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $user = User::factory()->create(['name' => 'Siti']);
+        $user->assignRole([Peran::Guru->value, Peran::Operator->value]);
+
+        Livewire::test(EditUser::class, ['record' => $user->getRouteKey()])
+            ->assertSchemaStateSet(['peran' => Peran::Operator->value])
+            ->fillForm(['name' => 'Siti Aminah'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertEqualsCanonicalizing(['guru', 'operator'], $user->fresh()->getRoleNames()->all());
+    }
+
+    public function test_role_field_offers_only_panel_roles_and_may_be_left_empty(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $guru = User::factory()->create();
+        $guru->assignRole(Peran::Guru->value);
+
+        Livewire::test(EditUser::class, ['record' => $guru->getRouteKey()])
+            ->assertSchemaStateSet(['peran' => null])
+            ->assertFormFieldExists('peran', fn (Select $field): bool => $field->getOptions() === ['super_admin' => 'Super Admin', 'operator' => 'Operator']
+                && ! $field->isRequired()
+                && $field->getPlaceholder() === 'Tanpa akses panel')
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame(['guru'], $guru->fresh()->getRoleNames()->all());
+    }
+
+    public function test_super_admin_creates_a_user_without_panel_access(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        Livewire::test(CreateUser::class)
+            ->fillForm([
+                'name' => 'Siti Aminah',
+                'username' => 'siti',
+                'peran' => null,
+                'password' => 'rahasia-baru-123',
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertCount(0, User::query()->where('username', 'siti')->firstOrFail()->roles);
     }
 }

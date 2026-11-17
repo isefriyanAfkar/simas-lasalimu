@@ -4,7 +4,6 @@ namespace App\Filament\Resources\Users\Schemas;
 
 use App\Domains\Foundation\Enums\Agama;
 use App\Domains\Foundation\Enums\JenisKelamin;
-use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\UserService;
 use App\Filament\Resources\Users\Pages\EditUser;
@@ -57,7 +56,8 @@ class UserForm
                         Select::make('peran')
                             ->label('Role')
                             ->options(fn (?User $record): array => self::roleOptions($record))
-                            ->required(),
+                            ->placeholder('Tanpa akses panel')
+                            ->helperText('Tanpa role, pengguna tidak bisa masuk panel admin. Role guru dan tendik diatur lewat layar Guru dan Staf.'),
                         TextInput::make('password')
                             ->label('Kata sandi')
                             ->password()
@@ -147,7 +147,8 @@ class UserForm
     }
 
     /**
-     * Roles the signed-in user may grant, plus the role the record already has.
+     * Panel roles the signed-in user may grant, plus the panel role the record
+     * already has. Guru and tendik are never offered here.
      *
      * @return array<string, string>
      */
@@ -158,10 +159,10 @@ class UserForm
 
         $options = app(UserService::class)->grantableRoleOptions($pelaku);
 
-        foreach (Peran::cases() as $peran) {
-            if ($record?->hasRole($peran->value)) {
-                $options[$peran->value] = $peran->label();
-            }
+        $peranSaatIni = $record?->peranPanel();
+
+        if ($peranSaatIni !== null) {
+            $options[$peranSaatIni->value] = $peranSaatIni->label();
         }
 
         return $options;

@@ -65,7 +65,7 @@ class EditUser extends EditRecord
         /** @var User $record */
         $record = $this->getRecord();
 
-        $data['peran'] = $record->getRoleNames()->first();
+        $data['peran'] = $record->peranPanel()?->value;
         $data['nik'] = null;
         $data['hapus_nik'] = false;
         $data['tanggal_lahir'] = $record->tanggal_lahir?->toDateString();

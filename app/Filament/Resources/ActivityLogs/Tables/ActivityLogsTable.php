@@ -10,6 +10,7 @@ use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\AktivitasAkademik;
 use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Models\User;
+use App\Domains\People\Models\StatusKepegawaian;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -119,6 +120,10 @@ class ActivityLogsTable
             return AktivitasAkademik::label($subject);
         }
 
+        if ($subject instanceof StatusKepegawaian) {
+            return $subject->nama;
+        }
+
         if ($activity->log_name === 'pengaturan') {
             return 'Pengaturan sekolah';
         }
@@ -176,6 +181,7 @@ class ActivityLogsTable
     private static function formatValue(string $attribute, mixed $value): string
     {
         return match (true) {
+            $attribute === 'peran' && $value === null => 'tanpa akses panel',
             $value === null => '—',
             $attribute === 'status_aktif' => $value ? 'aktif' : 'nonaktif',
             $attribute === 'tingkat' && is_numeric($value) => Tingkat::tryFrom((int) $value)?->label() ?? (string) $value,
