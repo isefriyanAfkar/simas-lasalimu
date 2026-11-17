@@ -93,6 +93,12 @@ CLAUDE.md.
   `app/Domains/Academic/Services/AktivitasAkademik.php`.
 - Tambahkan nama objek baru di `describeSubject` pada
   `app/Filament/Resources/ActivityLogs/Tables/ActivityLogsTable.php`.
+- Model yang datanya bisa dihapus memakai trait
+  `App\Domains\Academic\Models\LabelDiLogAktivitas`. Trait itu menyimpan label
+  yang terbaca (misalnya "X-1 2026/2027") di `properties.label` pada setiap
+  entri log, baik dari trait `LogsActivity` maupun dari `activity()`
+  eksplisit. Log Aktivitas memakai label itu kalau subjeknya sudah tidak
+  ada. Contoh: `TahunAjaran`, `Semester`, `Rombel`.
 
 ## Test
 
@@ -116,5 +122,14 @@ CLAUDE.md.
   "Tahun ajaran 2026/2027 sudah dipakai oleh 2 rombel. Hapus rombelnya
   dulu." Setiap kali tabel baru merujuk data yang sudah ada, tambahkan
   pemeriksaan itu di Service pemilik data tersebut, beserta test-nya.
+- Pemeriksaan pemakaian dilakukan di dalam transaksi berkunci:
+  - Service yang menghapus mengunci baris induk (`lockForUpdate`), lalu
+    menghitung pemakaian dengan pembacaan berkunci (`sharedLock()->count()`);
+  - Service yang membuat data anak mengunci baris induk yang dipilih
+    (`sharedLock`) sebelum memvalidasinya.
+
+  Dengan begitu, hapus dan tambah yang terjadi bersamaan berjalan bergiliran.
+  Contoh: `TahunAjaranService::delete()` dan
+  `RombelService::lockSchoolYear()`.
 - Tahun ajaran dan semester aktif dibaca lewat
   `App\Domains\Academic\Services\PeriodeAkademik`.

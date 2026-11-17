@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament\Resources\TahunAjarans;
 
 use App\Domains\Academic\Enums\JenisSemester;
+use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\TahunAjaranService;
@@ -99,6 +100,19 @@ class TahunAjaranResourceTest extends TestCase
 
         $this->assertSame(0, TahunAjaran::query()->count());
         $this->assertSame(0, Semester::query()->count());
+    }
+
+    public function test_deleting_a_school_year_used_by_rombel_shows_the_refusal(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $tahunAjaran = $this->schoolYear();
+        Rombel::factory()->for($tahunAjaran)->create(['nomor' => 1]);
+
+        Livewire::test(ListTahunAjarans::class)
+            ->callAction(TestAction::make('hapus')->table($tahunAjaran))
+            ->assertNotified('Tahun ajaran 2026/2027 sudah dipakai oleh 1 rombel. Hapus rombelnya dulu.');
+
+        $this->assertNotNull($tahunAjaran->fresh());
     }
 
     public function test_delete_action_is_hidden_for_the_active_school_year(): void

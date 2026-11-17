@@ -40,7 +40,7 @@ use Spatie\Activitylog\Support\LogOptions;
 class Rombel extends Model
 {
     /** @use HasFactory<RombelFactory> */
-    use HasFactory, LogsActivity;
+    use HasFactory, LabelDiLogAktivitas, LogsActivity;
 
     /**
      * The one standard way to name a study group: Roman grade, a dash, the
@@ -99,6 +99,7 @@ class Rombel extends Model
     protected function casts(): array
     {
         return [
+            'tahun_ajaran_id' => 'integer',
             'tingkat' => Tingkat::class,
             'nomor' => 'integer',
             'kapasitas' => 'integer',

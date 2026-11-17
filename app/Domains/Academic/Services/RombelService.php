@@ -75,9 +75,28 @@ class RombelService
         }, self::ATTEMPTS));
     }
 
+    /**
+     * Nothing references rombel yet. When a table starts to (students,
+     * schedules, journals), it uses restrictOnDelete and this method must
+     * first count that use inside the transaction, under a lock, and refuse
+     * with a message naming it, like TahunAjaranService::delete().
+     */
     public function delete(Rombel $rombel): void
     {
         DB::transaction(fn () => $rombel->delete());
+    }
+
+    /**
+     * Locks the chosen school year row (shared), so a concurrent
+     * TahunAjaranService::delete() either finishes first (and the exists rule
+     * then fails cleanly) or waits until this rombel is saved (and then counts
+     * it and refuses).
+     */
+    private function lockSchoolYear(mixed $tahunAjaranId): void
+    {
+        if (is_numeric($tahunAjaranId)) {
+            TahunAjaran::query()->whereKey((int) $tahunAjaranId)->sharedLock()->first(['id']);
+        }
     }
 
     /**
@@ -91,6 +110,11 @@ class RombelService
      */
     private function validate(array $data, ?Rombel $ignore): array
     {
+        if ($ignore === null && app(PengaturanSekolah::class)->jenjang === null) {
+            throw ValidationException::withMessages(['tingkat' => self::PESAN_JENJANG_KOSONG]);
+        }
+
+        $this->lockSchoolYear($data['tahun_ajaran_id'] ?? null);
         Rombel::query()->lockForUpdate()->get(['id']);
 
         $validator = Validator::make($data, [

@@ -31,7 +31,10 @@ class RombelForm
                     ->label('Tingkat')
                     ->options(fn (?Rombel $record): array => self::tingkatOptions($record))
                     ->helperText(fn (): ?string => app(PengaturanSekolah::class)->jenjang === null ? RombelService::PESAN_JENJANG_KOSONG : null)
-                    ->required(),
+                    // Not required while the jenjang is empty: there is
+                    // nothing to choose, and RombelService then answers with
+                    // its own message instead of a generic "required" one.
+                    ->required(fn (): bool => app(PengaturanSekolah::class)->jenjang !== null),
                 TextInput::make('nomor')
                     ->label('Nomor')
                     ->helperText('Nama rombel dibentuk dari tingkat dan nomor, misalnya X-1.')

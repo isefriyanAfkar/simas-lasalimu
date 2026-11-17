@@ -130,7 +130,9 @@ class TahunAjaranService
                 throw PelanggaranAturanAkademik::tahunAjaranAktifTidakBolehDihapus();
             }
 
-            $jumlahRombel = $tahunAjaran->rombel()->count();
+            // Locking read: sees rombel committed by a save that held this
+            // school year's row until now, and blocks new ones until commit.
+            $jumlahRombel = $tahunAjaran->rombel()->sharedLock()->count();
 
             if ($jumlahRombel > 0) {
                 throw PelanggaranAturanAkademik::tahunAjaranDipakaiRombel($tahunAjaran->nama, $jumlahRombel);

@@ -126,11 +126,49 @@ class RombelResourceTest extends TestCase
 
         Livewire::test(CreateRombel::class)
             ->assertSee('Jenjang sekolah belum diisi. Isi dulu di menu Pengaturan Sekolah.')
-            ->fillForm(['tingkat' => 10, 'nomor' => 1])
+            ->fillForm(['nomor' => 1])
             ->call('create')
-            ->assertHasFormErrors(['tingkat']);
+            ->assertHasErrors(['data.tingkat' => ['Jenjang sekolah belum diisi. Isi dulu di menu Pengaturan Sekolah.']]);
 
         $this->assertSame(0, Rombel::query()->count());
+    }
+
+    public function test_an_old_rombel_stays_editable_on_the_form_after_the_school_level_changes(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $rombel = $this->rombel($this->aktif, Tingkat::X, 1);
+        $this->setJenjang(Jenjang::Smp);
+
+        Livewire::test(EditRombel::class, ['record' => $rombel->getRouteKey()])
+            ->assertSchemaStateSet(['tingkat' => 10])
+            ->fillForm(['kapasitas' => 28])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame(28, $rombel->fresh()->kapasitas);
+        $this->assertSame(Tingkat::X, $rombel->fresh()->tingkat);
+    }
+
+    public function test_the_tingkat_filter_still_offers_levels_of_an_earlier_school_level(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $x = $this->rombel($this->aktif, Tingkat::X, 1);
+        $this->setJenjang(Jenjang::Smp);
+
+        Livewire::test(ListRombels::class)
+            ->assertTableFilterExists('tingkat', fn ($filter): bool => array_key_exists(Tingkat::X->value, $filter->getOptions()))
+            ->filterTable('tingkat', Tingkat::X->value)
+            ->assertCanSeeTableRecords([$x]);
+    }
+
+    public function test_the_delete_confirmation_names_the_rombel(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $rombel = $this->rombel($this->aktif, Tingkat::X, 1);
+
+        Livewire::test(ListRombels::class)
+            ->mountAction(TestAction::make('hapus')->table($rombel))
+            ->assertMountedActionModalSee('Rombel X-1 2026/2027 akan dihapus.');
     }
 
     public function test_a_duplicate_rombel_is_shown_on_the_nomor_field(): void

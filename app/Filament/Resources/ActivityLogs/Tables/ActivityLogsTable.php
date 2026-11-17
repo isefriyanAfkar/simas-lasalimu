@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ActivityLogs\Tables;
 
+use App\Domains\Academic\Enums\Tingkat;
 use App\Domains\Academic\Models\MataPelajaran;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\Semester;
@@ -111,19 +112,30 @@ class ActivityLogsTable
             return null;
         }
 
+        $label = $activity->getProperty('label');
+
+        if (is_string($label)) {
+            return $label;
+        }
+
         return class_basename($activity->subject_type).' #'.$activity->subject_id;
     }
 
     /**
      * "field: old → new" per changed attribute, or "field: value" when there is
      * no old value, followed by "menggantikan <label>" for an activation that
-     * replaced another period.
+     * replaced another period. A deletion has only old values; they are shown
+     * as "field: value".
      */
     private static function describeChanges(Activity $activity): ?string
     {
         $new = $activity->attribute_changes['attributes'] ?? [];
         $old = $activity->attribute_changes['old'] ?? [];
         $digantikan = $activity->getProperty('menggantikan.label');
+
+        if ($new === [] && $old !== []) {
+            [$new, $old] = [$old, []];
+        }
 
         $parts = [];
 
@@ -145,6 +157,7 @@ class ActivityLogsTable
         return match (true) {
             $value === null => '—',
             $attribute === 'status_aktif' => $value ? 'aktif' : 'nonaktif',
+            $attribute === 'tingkat' && is_numeric($value) => Tingkat::tryFrom((int) $value)?->label() ?? (string) $value,
             is_bool($value) => $value ? 'ya' : 'tidak',
             default => (string) $value,
         };

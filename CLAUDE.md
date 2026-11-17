@@ -178,6 +178,16 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
   baca lewat $rombel->nama, atau App\Domains\Academic\Models\Rombel::namaDari()
   kalau belum memegang model. Berlaku untuk jadwal, jurnal, presensi, dan modul
   lain.
+- Penghapusan:
+  - Data yang punya riwayat dan dirujuk data lain tidak dihapus, tetapi
+    diganti statusnya (nonaktifkan dan aktifkan), seperti mata pelajaran dan
+    pengguna.
+  - Data induk boleh dihapus permanen selama belum dipakai, seperti tahun
+    ajaran dan rombel. Ini dijaga restrictOnDelete di database dan
+    pemeriksaan pemakaian di Service, dengan pesan yang menyebut apa yang
+    memakainya.
+  - SoftDeletes hanya untuk konten yang tidak dirujuk data akademik, seperti
+    artikel dan galeri.
 - Hak akses lewat Policy dan Spatie Permission.
 - Nama tabel, kolom, dan model memakai istilah sekolah berbahasa Indonesia:
   peserta_didik, wali_murid, tahun_ajaran.

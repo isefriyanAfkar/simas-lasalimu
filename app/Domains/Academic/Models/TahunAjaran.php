@@ -39,7 +39,7 @@ use Spatie\Activitylog\Support\LogOptions;
 class TahunAjaran extends Model
 {
     /** @use HasFactory<TahunAjaranFactory> */
-    use HasFactory, LogsActivity;
+    use HasFactory, LabelDiLogAktivitas, LogsActivity;
 
     /**
      * @return HasMany<Semester, $this>

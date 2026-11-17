@@ -153,6 +153,48 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnFormattedStateSet('event', 'Rombel dibuat', $log);
     }
 
+    public function test_entries_of_a_deleted_rombel_keep_its_readable_name(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $settings = app(PengaturanSekolah::class);
+        $settings->jenjang = Jenjang::Sma;
+        $settings->save();
+        $tahunAjaran = app(TahunAjaranService::class)->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26']);
+        $rombel = app(RombelService::class)->create(['tahun_ajaran_id' => $tahunAjaran->id, 'tingkat' => 10, 'nomor' => 1]);
+        app(RombelService::class)->delete($rombel);
+
+        $created = Activity::query()->where('event', 'created')->where('subject_type', $rombel->getMorphClass())->sole();
+        $deleted = Activity::query()->where('event', 'deleted')->where('subject_type', $rombel->getMorphClass())->sole();
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'X-1 2026/2027', $created)
+            ->assertTableColumnStateSet('objek', 'X-1 2026/2027', $deleted)
+            ->assertTableColumnStateSet('rincian', "tahun_ajaran_id: {$tahunAjaran->id}; tingkat: X; nomor: 1; kapasitas: —", $deleted);
+    }
+
+    public function test_entries_of_a_deleted_school_year_and_its_semesters_keep_their_readable_names(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->actingAs($superAdmin);
+        $service = app(TahunAjaranService::class);
+        $tahunAjaran = $service->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26']);
+        $lain = $service->create(['nama' => '2027/2028', 'tanggal_mulai' => '2027-07-12', 'tanggal_selesai' => '2028-06-24']);
+        $this->travelTo('2026-09-15');
+        $service->activate($superAdmin, $tahunAjaran);
+        $service->activate($superAdmin, $lain);
+        $ganjil = $tahunAjaran->semesterGanjil;
+        $service->delete($tahunAjaran->fresh());
+
+        $tahunAjaranCreated = Activity::query()->where('event', 'created')->where('subject_type', $tahunAjaran->getMorphClass())->where('subject_id', $tahunAjaran->id)->sole();
+        $tahunAjaranActivated = Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->where('subject_id', $tahunAjaran->id)->sole();
+        $semesterDeleted = Activity::query()->where('event', 'deleted')->where('subject_type', $ganjil->getMorphClass())->where('subject_id', $ganjil->id)->sole();
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'TA 2026/2027', $tahunAjaranCreated)
+            ->assertTableColumnStateSet('objek', 'TA 2026/2027', $tahunAjaranActivated)
+            ->assertTableColumnStateSet('objek', 'Ganjil 2026/2027', $semesterDeleted);
+    }
+
     public function test_entry_without_actor_is_shown_as_sistem(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

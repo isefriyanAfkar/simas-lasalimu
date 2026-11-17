@@ -5,9 +5,9 @@ namespace App\Filament\Resources\Rombels\Tables;
 use App\Domains\Academic\Enums\Tingkat;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
+use App\Domains\Academic\Services\AktivitasAkademik;
 use App\Domains\Academic\Services\PeriodeAkademik;
 use App\Domains\Academic\Services\RombelService;
-use App\Domains\Foundation\Settings\PengaturanSekolah;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
@@ -52,6 +52,7 @@ class RombelsTable
                     ->icon(Heroicon::OutlinedTrash)
                     ->color('danger')
                     ->requiresConfirmation()
+                    ->modalDescription(fn (Rombel $record): string => 'Rombel '.AktivitasAkademik::label($record).' akan dihapus.')
                     ->authorize('delete')
                     ->action(function (Rombel $record): void {
                         app(RombelService::class)->delete($record);
@@ -71,18 +72,13 @@ class RombelsTable
     }
 
     /**
-     * The school's levels; every level while the jenjang is not set.
+     * Every level, not only the current jenjang's: rombel kept from an
+     * earlier jenjang must stay findable.
      *
      * @return array<int, string>
      */
     private static function tingkatOptions(): array
     {
-        $jenjang = app(PengaturanSekolah::class)->jenjang;
-
-        if ($jenjang !== null) {
-            return Tingkat::optionsUntukJenjang($jenjang);
-        }
-
         $options = [];
 
         foreach (Tingkat::cases() as $tingkat) {

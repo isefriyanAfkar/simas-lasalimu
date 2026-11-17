@@ -39,7 +39,7 @@ use Spatie\Activitylog\Support\LogOptions;
 class Semester extends Model
 {
     /** @use HasFactory<SemesterFactory> */
-    use HasFactory, LogsActivity;
+    use HasFactory, LabelDiLogAktivitas, LogsActivity;
 
     /**
      * @return BelongsTo<TahunAjaran, $this>
