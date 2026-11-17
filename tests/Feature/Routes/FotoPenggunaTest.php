@@ -80,10 +80,33 @@ class FotoPenggunaTest extends TestCase
     public function test_someone_not_allowed_to_view_the_user_gets_403(): void
     {
         $user = $this->userWithPhoto();
+        $user->assignRole('operator');
 
         $this->actingAs(User::factory()->operator()->create())
             ->get(route('pengguna.foto', $user))
             ->assertForbidden();
+    }
+
+    /**
+     * The Guru dan Staf form previews the photo of an account chosen to be
+     * linked; operators cannot view users, but may link this account.
+     */
+    public function test_someone_who_may_link_an_account_sees_its_photo(): void
+    {
+        $user = $this->userWithPhoto();
+
+        $this->actingAs(User::factory()->operator()->create())
+            ->get(route('pengguna.foto', $user))
+            ->assertOk();
+    }
+
+    public function test_an_account_without_staff_record_stays_closed_to_someone_who_may_not_create_staff(): void
+    {
+        $user = $this->userWithPhoto();
+        $guru = User::factory()->create();
+        $guru->assignRole('guru');
+
+        $this->actingAs($guru)->get(route('pengguna.foto', $user))->assertForbidden();
     }
 
     public function test_someone_allowed_to_view_the_staff_record_sees_the_staff_photo(): void

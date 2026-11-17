@@ -16,10 +16,13 @@ use Closure;
 use Database\Seeders\PeranDanIzinSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 /**
@@ -475,6 +478,58 @@ class PtkServiceTest extends TestCase
         }
 
         $this->assertNull($ptk->fresh()->kode);
+    }
+
+    public function test_changing_the_kind_never_touches_a_role_outside_the_staff_roles(): void
+    {
+        Role::findOrCreate('wali_murid', 'web');
+        $operator = User::factory()->operator()->create();
+        $ptk = Ptk::factory()->for(User::factory()->state(['jenis_kelamin' => 'laki-laki']))->create();
+        $ptk->user->assignRole('wali_murid');
+
+        $this->service()->update($operator, $ptk, $this->editData($ptk, ['jenis_ptk' => 'tendik']));
+
+        $this->assertEqualsCanonicalizing(['tendik', 'wali_murid'], $ptk->user->fresh()->getRoleNames()->all());
+        $this->assertSame([Peran::Guru, Peran::Tendik], Peran::peranStaf());
+    }
+
+    public function test_a_new_account_gets_the_uploaded_photo(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('foto-pengguna/hafida.png', UploadedFile::fake()->image('hafida.png')->getContent());
+
+        $ptk = $this->service()->create(User::factory()->operator()->create(), $this->data(['foto' => 'foto-pengguna/hafida.png']));
+
+        $this->assertSame('foto-pengguna/hafida.png', $ptk->user->fresh()->foto);
+    }
+
+    public function test_linking_an_account_keeps_its_photo(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('foto-pengguna/budi.png', UploadedFile::fake()->image('budi.png')->getContent());
+        $user = User::factory()->create(['username' => 'budi', 'foto' => 'foto-pengguna/budi.png']);
+
+        $this->service()->create(User::factory()->operator()->create(), $this->data([
+            'akun' => 'ada',
+            'user_id' => $user->id,
+            'username' => 'budi',
+            'nik' => null,
+            'foto' => 'foto-pengguna/budi.png',
+        ]));
+
+        $this->assertSame('foto-pengguna/budi.png', $user->fresh()->foto);
+        Storage::disk('local')->assertExists('foto-pengguna/budi.png');
+    }
+
+    public function test_the_photo_of_another_account_is_rejected(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('foto-pengguna/siti.png', UploadedFile::fake()->image('siti.png')->getContent());
+        User::factory()->create(['foto' => 'foto-pengguna/siti.png']);
+
+        $this->assertValidationError('foto', fn () => $this->service()->create(User::factory()->operator()->create(), $this->data(['foto' => 'foto-pengguna/siti.png'])));
+
+        $this->assertSame(0, Ptk::query()->count());
     }
 
     public function test_create_and_update_are_logged_without_the_nik(): void

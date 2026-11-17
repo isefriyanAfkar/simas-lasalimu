@@ -84,8 +84,22 @@ class UserPolicyTest extends TestCase
         $this->assertTrue($user->can('viewFoto', $user));
         $this->assertTrue($viewer->can('viewFoto', $user));
         $this->assertTrue(User::factory()->superAdmin()->create()->can('viewFoto', $user));
-        $this->assertFalse(User::factory()->operator()->create()->can('viewFoto', $user));
         $this->assertFalse(User::factory()->create()->can('viewFoto', $user));
+    }
+
+    /**
+     * An operator cannot view users, but may link an account without a staff
+     * record that they may manage on the Guru dan Staf form, which previews
+     * its photo. Another operator's account stays closed.
+     */
+    public function test_view_foto_follows_who_may_link_an_account_to_a_staff_record(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $tanpaRole = User::factory()->create();
+        $operatorLain = User::factory()->operator()->create();
+
+        $this->assertTrue($operator->can('viewFoto', $tanpaRole));
+        $this->assertFalse($operator->can('viewFoto', $operatorLain));
     }
 
     public function test_view_nik_follows_the_view_nik_permission(): void

@@ -448,11 +448,6 @@ class UserService
     }
 
     /**
-     * Normalize a phone number to the 62 format: spaces, dashes, dots and
-     * brackets are dropped, then a leading 0 or +62 becomes 62. Anything else
-     * is returned as is and fails validation.
-     */
-    /**
      * Validate the account part of the staff form (PtkService), without
      * writing: name, username, email and every biodata rule, with
      * jenis_kelamin required. $user is the account being changed or linked,
@@ -481,7 +476,7 @@ class UserService
      */
     public function simpanAkunPtk(User $pelaku, ?User $user, array $data, Peran $peranPtk): User
     {
-        if ($peranPtk->aksesPanel()) {
+        if (! in_array($peranPtk, Peran::peranStaf(), true)) {
             throw new LogicException("{$peranPtk->value} is not a staff role.");
         }
 
@@ -592,6 +587,11 @@ class UserService
         });
     }
 
+    /**
+     * Normalize a phone number to the 62 format: spaces, dashes, dots and
+     * brackets are dropped, then a leading 0 or +62 becomes 62. Anything else
+     * is returned as is and fails validation.
+     */
     public static function normalisasiNoHp(string $noHp): string
     {
         $noHp = (string) preg_replace('/[\s\-.()]+/u', '', $noHp);
@@ -1051,16 +1051,16 @@ class UserService
 
     /**
      * Give the staff role $baru (guru or tendik) and take away the other
-     * staff role; panel roles stay. A change is logged as role_berubah with
-     * peran_ptk.
+     * staff role. Only the staff roles are touched: panel roles and any other
+     * role stay. A change is logged as role_berubah with peran_ptk.
      */
     private function aturPeranPtk(User $pelaku, User $user, Peran $baru): void
     {
         $user->unsetRelation('roles');
         $lama = null;
 
-        foreach (Peran::cases() as $peran) {
-            if ($peran->aksesPanel() || ! $user->hasRole($peran->value)) {
+        foreach (Peran::peranStaf() as $peran) {
+            if (! $user->hasRole($peran->value)) {
                 continue;
             }
 

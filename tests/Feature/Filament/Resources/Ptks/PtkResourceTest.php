@@ -12,13 +12,18 @@ use App\Filament\Resources\Ptks\Pages\EditPtk;
 use App\Filament\Resources\Ptks\Pages\ListPtks;
 use App\Filament\Resources\Ptks\Pages\ViewPtk;
 use App\Filament\Resources\Ptks\PtkResource;
+use App\Filament\Resources\Users\Schemas\UserForm;
+use Database\Factories\UserFactory;
 use Database\Seeders\PeranDanIzinSeeder;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Livewire\Livewire;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 class PtkResourceTest extends TestCase
@@ -26,6 +31,8 @@ class PtkResourceTest extends TestCase
     use LazilyRefreshDatabase;
 
     private const string NIK = '7404012345670001';
+
+    private const string NIK_TERSAMAR = '7404********0001';
 
     protected function setUp(): void
     {
@@ -190,7 +197,7 @@ class PtkResourceTest extends TestCase
 
     public function test_the_account_search_offers_only_accounts_the_operator_may_link(): void
     {
-        $this->actingAs(User::factory()->operator()->create(['name' => 'Saya Operator']));
+        $this->actingAs(User::factory()->operator()->create(['name' => 'Saya Operator', 'username' => 'saya.operator']));
         User::factory()->create(['name' => 'Sari Bebas', 'username' => 'sari']);
         User::factory()->operator()->create(['name' => 'Sari Operator']);
         User::factory()->superAdmin()->create(['name' => 'Sari Admin']);
@@ -303,6 +310,106 @@ class PtkResourceTest extends TestCase
             ->assertActionDoesNotExist('delete');
     }
 
+    public function test_the_view_page_hides_the_masked_nik_of_an_account_the_operator_may_not_reveal(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $ptk = Ptk::factory()->for($this->userWithNik(User::factory()->operator()))->create();
+
+        Livewire::test(ViewPtk::class, ['record' => $ptk->getRouteKey()])
+            ->assertFormFieldExists('nik', fn (TextInput $field): bool => $field->getPlaceholder() === null)
+            ->assertFormFieldHidden('hapus_nik')
+            ->assertSee(UserForm::KETERANGAN_NIK)
+            ->assertDontSee('Kosongkan untuk tetap memakai NIK tersimpan.')
+            ->assertDontSeeHtml(self::NIK_TERSAMAR);
+    }
+
+    public function test_the_edit_page_shows_the_masked_nik_to_who_may_reveal_it(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $ptk = Ptk::factory()->for($this->userWithNik(User::factory()))->create();
+
+        Livewire::test(EditPtk::class, ['record' => $ptk->getRouteKey()])
+            ->assertFormFieldExists('nik', fn (TextInput $field): bool => $field->getPlaceholder() === self::NIK_TERSAMAR)
+            ->assertSee('Kosongkan untuk tetap memakai NIK tersimpan.')
+            ->assertFormFieldVisible('hapus_nik');
+    }
+
+    public function test_without_view_nik_permission_the_edit_page_shows_no_masked_nik(): void
+    {
+        Role::findByName('operator', 'web')->revokePermissionTo('ViewNik:User');
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->actingAs(User::factory()->operator()->create());
+        $ptk = Ptk::factory()->for($this->userWithNik(User::factory()))->create();
+
+        Livewire::test(EditPtk::class, ['record' => $ptk->getRouteKey()])
+            ->assertFormFieldExists('nik', fn (TextInput $field): bool => $field->getPlaceholder() === null)
+            ->assertFormFieldHidden('hapus_nik')
+            ->assertDontSeeHtml(self::NIK_TERSAMAR);
+    }
+
+    public function test_choosing_an_account_shows_its_masked_nik(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $user = $this->userWithNik(User::factory());
+
+        Livewire::test(CreatePtk::class)
+            ->fillForm(['akun' => 'ada'])
+            ->fillForm(['user_id' => $user->id])
+            ->assertFormFieldExists('nik', fn (TextInput $field): bool => $field->getPlaceholder() === self::NIK_TERSAMAR);
+    }
+
+    public function test_changing_the_account_choice_empties_the_copied_data(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $user = User::factory()->create(['name' => 'Budi', 'username' => 'budi', 'tempat_lahir' => 'Kendari']);
+
+        Livewire::test(CreatePtk::class)
+            ->fillForm(['akun' => 'ada'])
+            ->fillForm(['user_id' => $user->id])
+            ->assertSchemaStateSet(['name' => 'Budi'])
+            ->fillForm(['user_id' => null])
+            ->assertSchemaStateSet(['name' => null, 'username' => null, 'tempat_lahir' => null])
+            ->fillForm(['user_id' => $user->id])
+            ->fillForm(['akun' => 'baru'])
+            ->assertSchemaStateSet(['user_id' => null, 'name' => null, 'username' => null, 'tempat_lahir' => null]);
+    }
+
+    public function test_a_tampered_account_choice_reveals_nothing(): void
+    {
+        $this->actingAs(User::factory()->operator()->create());
+        $superAdmin = User::factory()->superAdmin()->create(['name' => 'Kepala TU', 'tempat_lahir' => 'Kendari']);
+
+        Livewire::test(CreatePtk::class)
+            ->fillForm(['akun' => 'ada'])
+            ->fillForm(['user_id' => $superAdmin->id])
+            ->assertSchemaStateSet(['name' => null, 'tempat_lahir' => null])
+            ->assertFormFieldExists('user_id', fn (Select $field): bool => $field->getOptionLabel(withDefault: false) === null)
+            ->assertDontSeeHtml('Kepala TU');
+    }
+
+    public function test_the_account_search_is_not_cut_short_by_accounts_the_operator_may_not_link(): void
+    {
+        $this->actingAs(User::factory()->operator()->create(['name' => 'Operator Uji', 'username' => 'operator.uji']));
+        User::factory()->count(51)->operator()->sequence(fn ($sequence): array => ['name' => 'Sari Operator '.str_pad((string) $sequence->index, 2, '0', STR_PAD_LEFT)])->create();
+        User::factory()->create(['name' => 'Sari Zahra', 'username' => 'zahra']);
+
+        Livewire::test(CreatePtk::class)
+            ->fillForm(['akun' => 'ada'])
+            ->assertFormFieldExists('user_id', fn (Select $field): bool => array_values($field->getSearchResults('Sari')) === ['Sari Zahra (zahra)']);
+    }
+
+    public function test_the_account_search_matches_percent_and_underscore_literally(): void
+    {
+        $this->actingAs(User::factory()->operator()->create(['name' => 'Operator', 'username' => 'operator']));
+        User::factory()->create(['name' => 'Budi Santoso', 'username' => 'budi']);
+        User::factory()->create(['name' => 'Siti 100%', 'username' => 'siti']);
+
+        Livewire::test(CreatePtk::class)
+            ->fillForm(['akun' => 'ada'])
+            ->assertFormFieldExists('user_id', fn (Select $field): bool => array_values($field->getSearchResults('%')) === ['Siti 100% (siti)']
+                && $field->getSearchResults('_') === []);
+    }
+
     public function test_reveal_nik_on_the_edit_page_is_logged(): void
     {
         $operator = User::factory()->operator()->create();
@@ -317,5 +424,14 @@ class PtkResourceTest extends TestCase
             ->assertSet('nikTerbuka', self::NIK);
 
         $this->assertDatabaseHas('activity_log', ['event' => 'nik_ditampilkan', 'subject_id' => $user->id]);
+    }
+
+    private function userWithNik(UserFactory $factory): User
+    {
+        $user = $factory->create();
+        $user->isiNik(self::NIK);
+        $user->save();
+
+        return $user;
     }
 }

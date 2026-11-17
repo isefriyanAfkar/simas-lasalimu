@@ -4,6 +4,7 @@ namespace App\Domains\Foundation\Policies;
 
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\UserService;
+use App\Domains\People\Models\Ptk;
 
 /**
  * Hand-written policy. UserResource is excluded from Shield in
@@ -61,8 +62,10 @@ class UserPolicy
 
     /**
      * See the user's photo (pengguna.foto route): always one's own, otherwise
-     * whoever may view that user, or that user's staff record (the Guru dan
-     * Staf form shows the photo to operators, who cannot view users).
+     * whoever may view that user, or that user's staff record. An account
+     * without a staff record may also be seen by whoever may link it on the
+     * Guru dan Staf form: allowed to create staff and to manage the account
+     * (operators cannot view users, but the form shows the photo).
      */
     public function viewFoto(User $authUser, User $user): bool
     {
@@ -72,7 +75,11 @@ class UserPolicy
 
         $ptk = $user->ptk;
 
-        return $ptk !== null && $authUser->can('view', $ptk);
+        if ($ptk !== null) {
+            return $authUser->can('view', $ptk);
+        }
+
+        return $authUser->can('create', Ptk::class) && $this->userService->canManage($authUser, $user);
     }
 
     public function delete(User $authUser, User $user): bool

@@ -51,6 +51,18 @@ enum Peran: string
     }
 
     /**
+     * The roles that follow a staff record (PTK). Listed explicitly, so a
+     * future role without panel access (for example a parent role) is never
+     * swapped by the staff screen.
+     *
+     * @return list<self>
+     */
+    public static function peranStaf(): array
+    {
+        return [self::Guru, self::Tendik];
+    }
+
+    /**
      * Panel roles only, for the role field of Kelola Pengguna.
      *
      * @return array<string, string>

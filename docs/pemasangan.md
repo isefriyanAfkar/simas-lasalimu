@@ -138,6 +138,11 @@ kata sandi minimal 8 karakter. Perintah ini juga bisa dijalankan lagi kapan pun
 untuk menambah super admin. Pembuatan tercatat di Log Aktivitas dengan pelaku
 "Sistem".
 
+Log Aktivitas juga dipakai aplikasi: "Aktifkan kembali" di Guru dan Staf hanya
+mengaktifkan lagi akun guru kalau entri log penonaktifan akunnya masih ada,
+jadi jangan memangkas log aktivitas (misalnya dengan `activitylog:clean`)
+sembarangan.
+
 Setelah itu buka `APP_URL`. Halaman awal langsung mengalihkan ke halaman login.
 
 ## Pembaruan

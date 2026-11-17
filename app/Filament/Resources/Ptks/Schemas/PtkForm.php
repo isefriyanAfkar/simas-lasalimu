@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Ptks\Schemas;
 
 use App\Domains\Foundation\Enums\Agama;
 use App\Domains\Foundation\Enums\JenisKelamin;
+use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\JenisPtk;
@@ -50,6 +51,10 @@ class PtkForm
                             ->inline()
                             ->required()
                             ->live()
+                            ->afterStateUpdated(function (Set $set): void {
+                                $set('user_id', null);
+                                self::clearAccount($set);
+                            })
                             ->visibleOn('create')
                             ->columnSpanFull(),
                         Select::make('user_id')
@@ -57,7 +62,7 @@ class PtkForm
                             ->helperText('Hanya pengguna yang belum terdaftar sebagai guru/staf dan boleh Anda kelola.')
                             ->searchable()
                             ->getSearchResultsUsing(fn (string $search): array => self::accountsToLink($search))
-                            ->getOptionLabelUsing(fn (mixed $value): ?string => self::accountLabel(User::query()->find($value)))
+                            ->getOptionLabelUsing(fn (mixed $value): ?string => self::accountLabel(self::linkableAccount($value)))
                             ->live()
                             ->afterStateUpdated(fn (mixed $state, Set $set) => self::fillFromAccount($state, $set))
                             ->required(fn (Get $get): bool => $get('akun') === 'ada')
@@ -84,16 +89,16 @@ class PtkForm
                             ->label('NIK')
                             ->maxLength(16)
                             ->autocomplete(false)
-                            ->placeholder(fn (?Ptk $record, Get $get): ?string => self::account($record, $get)?->nikTersamar())
+                            ->placeholder(fn (?Ptk $record, Get $get): ?string => self::nikAccount($record, $get)?->nikTersamar())
                             ->hint(fn (Component $livewire): ?string => $livewire instanceof EditPtk && $livewire->nikTerbuka !== null ? "NIK: {$livewire->nikTerbuka}" : null)
-                            ->helperText(fn (?Ptk $record, Get $get): string => self::account($record, $get)?->nik_hash !== null
+                            ->helperText(fn (?Ptk $record, Get $get): string => self::nikAccount($record, $get)?->nik_hash !== null
                                 ? 'Kosongkan untuk tetap memakai NIK tersimpan. '.UserForm::KETERANGAN_NIK
                                 : UserForm::KETERANGAN_NIK)
                             ->disabled(fn (Get $get): bool => (bool) $get('hapus_nik')),
                         Toggle::make('hapus_nik')
                             ->label('Hapus NIK')
                             ->live()
-                            ->visible(fn (?Ptk $record): bool => $record?->user->nik_hash !== null),
+                            ->visible(fn (?Ptk $record, Get $get): bool => $record !== null && self::nikAccount($record, $get)?->nik_hash !== null),
                         Select::make('jenis_kelamin')
                             ->label('Jenis kelamin')
                             ->options(JenisKelamin::options())
@@ -208,6 +213,20 @@ class PtkForm
     }
 
     /**
+     * The account whose stored NIK the form may hint at (masked NIK as
+     * placeholder, "keep the stored NIK" help text, Hapus NIK toggle): only
+     * when the signed-in user may reveal that NIK (UserPolicy::viewNik). An
+     * operator viewing a super_admin's or another operator's record learns
+     * neither the masked NIK nor whether there is one.
+     */
+    private static function nikAccount(?Ptk $record, Get $get): ?User
+    {
+        $user = self::account($record, $get);
+
+        return $user !== null && Filament::auth()->user()?->can('viewNik', $user) ? $user : null;
+    }
+
+    /**
      * The account $userId when it has no staff record and the signed-in user
      * may manage it, otherwise null.
      */
@@ -223,6 +242,9 @@ class PtkForm
 
     /**
      * Accounts without a staff record that the signed-in user may manage.
+     * The accounts a non super_admin may not manage are left out in the query
+     * (before the limit), and canManage is checked again on the result.
+     * % and _ in the search are matched literally.
      *
      * @return array<int, string>
      */
@@ -232,17 +254,37 @@ class PtkForm
         $pelaku = Filament::auth()->user();
         $userService = app(UserService::class);
 
+        $pola = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search).'%';
+
         return User::query()
             ->whereDoesntHave('ptk')
+            ->when(! $pelaku->isSuperAdmin(), fn ($query) => $query
+                ->withoutRole(Peran::SuperAdmin->value)
+                ->where(fn ($query) => $query
+                    ->withoutRole(Peran::Operator->value)
+                    ->orWhereKey($pelaku->getKey())))
             ->where(fn ($query) => $query
-                ->where('name', 'like', "%{$search}%")
-                ->orWhere('username', 'like', "%{$search}%"))
+                ->where('name', 'like', $pola)
+                ->orWhere('username', 'like', $pola))
             ->orderBy('name')
             ->limit(50)
             ->get()
             ->filter(fn (User $user): bool => $userService->canManage($pelaku, $user))
             ->mapWithKeys(fn (User $user): array => [$user->getKey() => (string) self::accountLabel($user)])
             ->all();
+    }
+
+    /**
+     * Empty the account and biodata fields, so data copied from a previously
+     * chosen account never stays behind after the choice changes.
+     */
+    private static function clearAccount(Set $set): void
+    {
+        foreach (['name', 'username', 'email', 'nik', 'jenis_kelamin', 'tempat_lahir', 'tanggal_lahir', 'agama', 'alamat', 'no_hp'] as $field) {
+            $set($field, null);
+        }
+
+        $set('foto', []);
     }
 
     private static function accountLabel(?User $user): ?string
@@ -260,6 +302,8 @@ class PtkForm
         $user = self::linkableAccount($userId);
 
         if ($user === null) {
+            self::clearAccount($set);
+
             return;
         }
 
