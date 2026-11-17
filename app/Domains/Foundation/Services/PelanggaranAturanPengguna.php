@@ -29,4 +29,9 @@ class PelanggaranAturanPengguna extends RuntimeException
     {
         return new self("Anda tidak boleh memberi role {$peran}.");
     }
+
+    public static function nikKosong(): self
+    {
+        return new self('Pengguna ini belum punya NIK.');
+    }
 }

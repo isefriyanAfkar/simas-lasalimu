@@ -49,6 +49,25 @@ class UserPolicyTest extends TestCase
         $this->assertFalse($operator->can('deleteAny', User::class));
     }
 
+    public function test_view_nik_is_allowed_to_super_admin_and_seeded_operator_only(): void
+    {
+        $user = User::factory()->create();
+
+        $this->assertTrue(User::factory()->superAdmin()->create()->can('viewNik', $user));
+        $this->assertTrue(User::factory()->operator()->create()->can('viewNik', $user));
+        $this->assertFalse(User::factory()->create()->can('viewNik', $user));
+    }
+
+    public function test_view_nik_follows_the_view_nik_permission(): void
+    {
+        $user = User::factory()->create();
+        $withPermission = User::factory()->create();
+        $withPermission->givePermissionTo('ViewNik:User');
+
+        $this->assertTrue($withPermission->can('viewNik', $user));
+        $this->assertTrue($withPermission->can('viewNik', $withPermission));
+    }
+
     public function test_super_admin_may_view_and_update_any_user(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

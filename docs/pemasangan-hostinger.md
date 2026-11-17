@@ -98,7 +98,14 @@ cd ~/domains/<alamat>/app
 /opt/alt/php84/usr/bin/php /usr/local/bin/composer2 install --no-dev --optimize-autoloader
 cp -n .env.example .env
 /opt/alt/php84/usr/bin/php artisan key:generate
+/opt/alt/php84/usr/bin/php -r "echo 'base64:'.base64_encode(random_bytes(32)).PHP_EOL;"
 ```
+
+`key:generate` dan perintah kunci NIK di atas **hanya untuk pemasangan
+pertama**. Jangan menjalankan `key:generate` lagi di server yang sudah
+dipakai: semua pengguna keluar dari sesi, dan seluruh NIK tidak bisa dibuka
+lagi, juga dari backup database. Penjelasan lengkap ada di langkah 2
+[pemasangan.md](pemasangan.md).
 
 Isian `.env` yang wajib untuk Hostinger:
 
@@ -107,7 +114,15 @@ APP_ENV=production
 APP_DEBUG=false
 APP_URL=https://<alamat>
 DB_CONNECTION=mariadb
+NIK_HMAC_KEY=base64:<hasil perintah kunci NIK>
 ```
+
+`NIK_HMAC_KEY` wajib diisi. Tanpa kunci ini, NIK tidak bisa disimpan.
+
+**Cadangkan `APP_KEY` dan `NIK_HMAC_KEY` terpisah dari backup database**,
+misalnya di pengelola kata sandi milik sekolah. Backup database Hostinger
+tidak memuat `.env`. Kalau `APP_KEY` hilang, semua NIK tidak bisa dibuka
+lagi. Kalau `NIK_HMAC_KEY` hilang, semua NIK tidak bisa dicari lagi.
 
 Isian `DB_*` lainnya mengikuti database yang dibuat di Hostinger. Setelah
 `.env` terisi, batasi aksesnya:

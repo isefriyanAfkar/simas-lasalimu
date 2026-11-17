@@ -25,9 +25,25 @@ php artisan key:generate
 ```
 
 Kedua perintah ini **hanya untuk server yang belum punya `.env`**. `cp -n` tidak
-menimpa `.env` yang sudah ada. Jangan menjalankan `key:generate` lagi pada
-server yang sudah dipakai, karena kunci baru membuat semua pengguna keluar
-dari sesi dan data yang dienkripsi dengan kunci lama tidak bisa dibaca lagi.
+menimpa `.env` yang sudah ada.
+
+> **Jangan menjalankan `key:generate` lagi pada server yang sudah dipakai.**
+> Perintah itu mengganti `APP_KEY`. Akibatnya semua pengguna keluar dari
+> sesi, dan semua data yang dienkripsi dengan kunci lama tidak bisa dibaca
+> lagi, termasuk **seluruh NIK** pengguna. NIK yang tidak bisa dibuka tidak
+> bisa dipulihkan, juga dari backup database.
+
+Lalu buat kunci NIK, sekali saja per server:
+
+```bash
+php -r "echo 'base64:'.base64_encode(random_bytes(32)).PHP_EOL;"
+```
+
+Salin hasilnya ke `NIK_HMAC_KEY` di `.env` (lihat di bawah). Kunci ini
+dipakai untuk mencari NIK dan menolak NIK kembar, dan sengaja terpisah dari
+`APP_KEY`. Tanpa kunci ini, NIK tidak bisa disimpan. Server yang sudah
+berjalan sebelum ada fitur NIK cukup menambahkan kunci ini sekali; jangan
+pernah menggantinya setelah ada NIK tersimpan.
 
 Lalu ubah isian berikut di `.env`:
 
@@ -47,10 +63,27 @@ DB_PORT=3306
 DB_DATABASE=nama_database
 DB_USERNAME=nama_pengguna_database
 DB_PASSWORD=kata_sandi_database
+
+NIK_HMAC_KEY=base64:hasil_perintah_di_atas
 ```
 
 - `APP_DEBUG` wajib `false` di produksi, karena kalau `true` pesan galat menampilkan isi konfigurasi.
 - Kata sandi database hanya disimpan di `.env` server, jangan di repo.
+- `NIK_HMAC_KEY` wajib diisi di produksi.
+
+#### Cadangkan `APP_KEY` dan `NIK_HMAC_KEY`
+
+Simpan salinan `APP_KEY` dan `NIK_HMAC_KEY` di tempat aman, **terpisah dari
+backup database** (misalnya pengelola kata sandi milik sekolah), dan jangan
+di repo.
+
+- Backup database saja tidak cukup. NIK di database terenkripsi dengan
+  `APP_KEY` dan dicari lewat `NIK_HMAC_KEY`.
+- Kalau `APP_KEY` hilang, **semua NIK tidak bisa dibuka lagi**.
+- Kalau `NIK_HMAC_KEY` hilang, **semua NIK tidak bisa dicari lagi**, dan NIK
+  kembar tidak bisa dicegah.
+- Kunci tidak disimpan bersama backup database, supaya orang yang memegang
+  file backup tidak otomatis bisa membaca NIK.
 
 ### 3. Buat tabel dan data awal
 

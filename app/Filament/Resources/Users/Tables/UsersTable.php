@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Users\Tables;
 
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\KunciNikTidakSiap;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use Closure;
@@ -13,9 +14,15 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
+/**
+ * The NIK is never a column. Someone allowed to reveal NIKs may type a full
+ * 16-digit NIK in the search box; it is matched through nik_hash.
+ */
 class UsersTable
 {
     public static function configure(Table $table): Table
@@ -23,9 +30,15 @@ class UsersTable
         return $table
             ->modifyQueryUsing(fn ($query) => $query->with('roles'))
             ->columns([
+                ImageColumn::make('foto')
+                    ->label('Foto')
+                    ->disk(UserService::FOTO_DISK)
+                    ->visibility('public')
+                    ->circular()
+                    ->imageHeight(32),
                 TextColumn::make('name')
                     ->label('Nama')
-                    ->searchable()
+                    ->searchable(query: fn (Builder $query, string $search): Builder => self::searchNameOrNik($query, $search))
                     ->sortable(),
                 TextColumn::make('username')
                     ->label('Nama pengguna')
@@ -88,6 +101,28 @@ class UsersTable
                         'Kata sandi diatur ulang',
                     )),
             ]);
+    }
+
+    /**
+     * Name contains $search, or, for someone allowed to reveal NIKs, the NIK
+     * equals $search. Without a usable NIK key the NIK part is skipped.
+     *
+     * @param  Builder<User>  $query
+     * @return Builder<User>
+     */
+    private static function searchNameOrNik(Builder $query, string $search): Builder
+    {
+        $query->where('name', 'like', "%{$search}%");
+
+        if (preg_match('/^\d{16}$/', $search) !== 1 || ! Filament::auth()->user()?->can('ViewNik:User')) {
+            return $query;
+        }
+
+        try {
+            return $query->orWhere(fn (Builder $query): Builder => $query->denganNik($search));
+        } catch (KunciNikTidakSiap) {
+            return $query;
+        }
     }
 
     /**

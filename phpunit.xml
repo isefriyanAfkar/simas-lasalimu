@@ -33,5 +33,6 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="NIK_HMAC_KEY" value="base64:a3VuY2ktdWppLW5pay1zaW1hcy0zMi1ieXRlLWFiY2Q="/>
     </php>
 </phpunit>

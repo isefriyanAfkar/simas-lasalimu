@@ -10,9 +10,9 @@ use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Creates the panel roles and their permissions. Safe to run repeatedly.
- * The operator role deliberately receives no User permission for now, every
- * TahunAjaran and Rombel permission except Delete, and every MataPelajaran
- * permission.
+ * The operator role deliberately receives no User permission for now except
+ * ViewNik:User, every TahunAjaran and Rombel permission except Delete, and
+ * every MataPelajaran permission.
  */
 class PeranDanIzinSeeder extends Seeder
 {
@@ -26,6 +26,7 @@ class PeranDanIzinSeeder extends Seeder
         'View:User',
         'Create:User',
         'Update:User',
+        'ViewNik:User',
     ];
 
     /**
@@ -64,11 +65,14 @@ class PeranDanIzinSeeder extends Seeder
 
     /**
      * Permissions the operator role holds. Deleting a school year or a rombel
-     * is left to the super_admin.
+     * is left to the super_admin. ViewNik:User (reveal a NIK in full, logged)
+     * has no screen for operators yet: it is for the future staff and student
+     * screens, where operators manage biodata.
      *
      * @var list<string>
      */
     public const array OPERATOR_PERMISSIONS = [
+        'ViewNik:User',
         'ViewAny:TahunAjaran',
         'View:TahunAjaran',
         'Create:TahunAjaran',

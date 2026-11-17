@@ -39,6 +39,15 @@ class UserPolicy
         return $authUser->can('Update:User') && $this->userService->canManage($authUser, $user);
     }
 
+    /**
+     * Reveal a user's NIK in full ("Tampilkan NIK"). Every use is logged by
+     * UserService::tampilkanNik().
+     */
+    public function viewNik(User $authUser, User $user): bool
+    {
+        return $authUser->can('ViewNik:User');
+    }
+
     public function delete(User $authUser, User $user): bool
     {
         return false;
