@@ -178,6 +178,10 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
   baca lewat $rombel->nama, atau App\Domains\Academic\Models\Rombel::namaDari()
   kalau belum memegang model. Berlaku untuk jadwal, jurnal, presensi, dan modul
   lain.
+- Nama lengkap guru dan staf dengan gelar ("Dra. Hafida, S.Pd., Gr.") tidak
+  pernah dirakit sendiri. Selalu baca lewat $ptk->nama_lengkap, atau
+  App\Domains\People\Models\Ptk::namaLengkapDari() kalau belum memegang model.
+  Berlaku untuk wali kelas, jadwal, jurnal, rapor, dan modul lain.
 - Penghapusan:
   - Data yang punya riwayat dan dirujuk data lain tidak dihapus, tetapi
     diganti statusnya (nonaktifkan dan aktifkan), seperti mata pelajaran dan

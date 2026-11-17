@@ -7,6 +7,7 @@ use App\Domains\Foundation\Enums\JenisKelamin;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\UserService;
 use App\Filament\Resources\Users\Pages\EditUser;
+use Closure;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -17,6 +18,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Component;
 
@@ -108,12 +110,18 @@ class UserForm
     }
 
     /**
-     * Shared with the profile page. UserService checks the stored file again.
-     * Files go to the private disk; the preview of a stored photo uses the
-     * protected pengguna.foto route instead of a signed temporary URL.
+     * Shared with the profile page and the staff form. UserService checks the
+     * stored file again. Files go to the private disk; the preview of a stored
+     * photo uses the protected pengguna.foto route instead of a signed
+     * temporary URL.
+     *
+     * $pemilikFoto returns the account whose photo is shown (utilities such as
+     * $record and $get are injected); by default the record when it is a User.
      */
-    public static function fotoField(): FileUpload
+    public static function fotoField(?Closure $pemilikFoto = null): FileUpload
     {
+        $pemilikFoto ??= fn (?Model $record): ?User => $record instanceof User ? $record : null;
+
         return FileUpload::make('foto')
             ->label('Foto')
             ->image()
@@ -123,7 +131,7 @@ class UserForm
             ->visibility('private')
             ->acceptedFileTypes(UserService::FOTO_MIME)
             ->maxSize(UserService::FOTO_MAKS_KB)
-            ->getUploadedFileUsing(fn (string $file, ?User $record): ?array => self::storedPhoto($file, $record))
+            ->getUploadedFileUsing(fn (FileUpload $component, string $file): ?array => self::storedPhoto($file, $component->evaluate($pemilikFoto)))
             ->helperText('JPG, PNG, atau WebP, paling besar 1 MB.');
     }
 

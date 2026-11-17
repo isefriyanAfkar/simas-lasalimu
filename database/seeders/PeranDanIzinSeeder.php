@@ -79,15 +79,28 @@ class PeranDanIzinSeeder extends Seeder
     ];
 
     /**
+     * Staff (Guru dan Staf). No Delete: staff are never deleted, they leave
+     * with a status. Update also covers changing the status.
+     *
+     * @var list<string>
+     */
+    public const array PTK_PERMISSIONS = [
+        'ViewAny:Ptk',
+        'View:Ptk',
+        'Create:Ptk',
+        'Update:Ptk',
+    ];
+
+    /**
      * Permissions the operator role holds. Deleting a school year or a rombel
      * is left to the super_admin. ViewNik:User (reveal a NIK in full, logged)
-     * has no screen for operators yet: it is for the future staff and student
-     * screens, where operators manage biodata.
+     * is used on the Guru dan Staf screen, where operators manage biodata.
      *
      * @var list<string>
      */
     public const array OPERATOR_PERMISSIONS = [
         'ViewNik:User',
+        ...self::PTK_PERMISSIONS,
         'ViewAny:TahunAjaran',
         'View:TahunAjaran',
         'Create:TahunAjaran',
@@ -107,7 +120,7 @@ class PeranDanIzinSeeder extends Seeder
             Role::findOrCreate($peran->value, 'web');
         }
 
-        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS, ...self::STATUS_KEPEGAWAIAN_PERMISSIONS] as $permission) {
+        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS, ...self::STATUS_KEPEGAWAIAN_PERMISSIONS, ...self::PTK_PERMISSIONS] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 

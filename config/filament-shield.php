@@ -5,6 +5,7 @@ use App\Domains\Foundation\Models\User;
 use App\Filament\Pages\KelolaPengaturanSekolah;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\MataPelajarans\MataPelajaranResource;
+use App\Filament\Resources\Ptks\PtkResource;
 use App\Filament\Resources\Rombels\RombelResource;
 use App\Filament\Resources\StatusKepegawaians\StatusKepegawaianResource;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
@@ -209,6 +210,7 @@ return [
             MataPelajaranResource::class,
             RombelResource::class,
             StatusKepegawaianResource::class,
+            PtkResource::class,
         ],
     ],
 

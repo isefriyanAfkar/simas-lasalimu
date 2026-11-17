@@ -16,11 +16,14 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Validator as ValidatorInstance;
+use LogicException;
+use Spatie\Activitylog\Models\Activity;
 
 /**
  * The only place that writes user accounts. Every method takes the acting
@@ -449,6 +452,146 @@ class UserService
      * brackets are dropped, then a leading 0 or +62 becomes 62. Anything else
      * is returned as is and fails validation.
      */
+    /**
+     * Validate the account part of the staff form (PtkService), without
+     * writing: name, username, email and every biodata rule, with
+     * jenis_kelamin required. $user is the account being changed or linked,
+     * null for a new account. Must run inside a transaction (it locks the
+     * user rows). simpanAkunPtk() validates again before writing.
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws ValidationException
+     */
+    public function validasiAkunPtk(array $data, ?User $user): void
+    {
+        $this->validateAccountData($data, $user, akunPtk: true);
+    }
+
+    /**
+     * Create ($user null) or change the account of a staff member and give it
+     * the staff role $peranPtk (guru or tendik), taking away the other staff
+     * role. Panel roles are never touched. A new account is active, has no
+     * panel role and gets a random password that is never shown. Must be
+     * called inside the staff service's transaction.
+     *
+     * @param  array<string, mixed>  $data  name, username, email, nik, hapus_nik and biodata
+     *
+     * @throws ValidationException
+     */
+    public function simpanAkunPtk(User $pelaku, ?User $user, array $data, Peran $peranPtk): User
+    {
+        if ($peranPtk->aksesPanel()) {
+            throw new LogicException("{$peranPtk->value} is not a staff role.");
+        }
+
+        if ($user !== null) {
+            $this->ensureCanManage($pelaku, $user);
+        }
+
+        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data, $peranPtk): User {
+            $data = $this->validateAccountData($data, $user, akunPtk: true);
+            $this->ensureCanGrantRole($pelaku, $peranPtk);
+
+            if ($user === null) {
+                $user = new User([
+                    'name' => $data['name'],
+                    'username' => $data['username'],
+                    'email' => $data['email'] ?? null,
+                    'password' => Str::password(32),
+                    'status_aktif' => true,
+                    ...Arr::only($data, self::BIODATA_FIELDS),
+                ]);
+                $this->applyNik($user, $data);
+                $user->save();
+                $user->assignRole($peranPtk->value);
+
+                $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
+                    'attributes' => [...$this->createdAttributes($user), 'peran' => null, 'peran_ptk' => $peranPtk->value],
+                ]);
+
+                return $user;
+            }
+
+            $before = $this->snapshot($user);
+            $nikHashBefore = $user->nik_hash;
+            $fotoBefore = $user->foto;
+
+            $user->fill([
+                'name' => $data['name'],
+                'username' => $data['username'],
+                'email' => $data['email'] ?? null,
+                ...Arr::only($data, self::BIODATA_FIELDS),
+            ]);
+            $this->applyNik($user, $data);
+            $user->save();
+
+            $changes = $this->diff($before, $this->snapshot($user), $this->markers($nikHashBefore, $user->nik_hash, $fotoBefore, $user->foto));
+            $this->deleteReplacedPhotoAfterCommit($fotoBefore, $user->foto);
+
+            if ($changes !== null) {
+                $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
+            }
+
+            $this->aturPeranPtk($pelaku, $user, $peranPtk);
+
+            return $user;
+        }, self::ATTEMPTS));
+    }
+
+    /**
+     * Deactivate the account of a staff member who left (PtkService), unless
+     * it holds a panel role or is already inactive. Returns the id of the log
+     * entry of the deactivation, or null when the account was left alone.
+     */
+    public function nonaktifkanKarenaStatusPtk(User $pelaku, User $user): ?int
+    {
+        $this->ensureCanManage($pelaku, $user);
+
+        return DB::transaction(function () use ($pelaku, $user): ?int {
+            $this->lockUser($user);
+
+            if ($user->peranPanel() !== null || ! $user->status_aktif) {
+                return null;
+            }
+
+            $entry = $this->changeStatus($pelaku, $user, false);
+
+            return $entry === null ? null : (int) $entry->getKey();
+        });
+    }
+
+    /**
+     * Reactivate the account of a staff member who comes back, but only when
+     * it is still inactive because of the deactivation logged as $logId: the
+     * latest status change of the account must be that entry. An account
+     * activated or deactivated in Kelola Pengguna afterwards is left alone.
+     */
+    public function aktifkanKembaliSetelahStatusPtk(User $pelaku, User $user, int $logId): void
+    {
+        $this->ensureCanManage($pelaku, $user);
+
+        DB::transaction(function () use ($pelaku, $user, $logId): void {
+            $this->lockUser($user);
+
+            if ($user->status_aktif) {
+                return;
+            }
+
+            $perubahanTerakhir = Activity::query()
+                ->where('log_name', self::LOG_NAME)
+                ->where('subject_type', $user->getMorphClass())
+                ->where('subject_id', $user->getKey())
+                ->whereIn('event', [AksiPengguna::Diaktifkan->value, AksiPengguna::Dinonaktifkan->value])
+                ->latest('id')
+                ->value('id');
+
+            if ((int) $perubahanTerakhir === $logId) {
+                $this->changeStatus($pelaku, $user, true);
+            }
+        });
+    }
+
     public static function normalisasiNoHp(string $noHp): string
     {
         $noHp = (string) preg_replace('/[\s\-.()]+/u', '', $noHp);
@@ -594,7 +737,7 @@ class UserService
      *
      * @throws ValidationException
      */
-    private function validateAccountData(array $data, ?User $ignore): array
+    private function validateAccountData(array $data, ?User $ignore, bool $akunPtk = false): array
     {
         $this->lockUsers();
 
@@ -612,15 +755,24 @@ class UserService
             $biodata['hapus_nik'] = $data['hapus_nik'];
         }
 
+        if ($akunPtk) {
+            $biodata['jenis_kelamin'] ??= null;
+        }
+
         $rules = [
             'name' => ['required', 'string', 'max:255'],
             'username' => self::usernameRules($ignore),
             'email' => self::emailRules($ignore),
-            'peran' => ['present', 'nullable', 'string', Rule::in(Peran::nilaiPanel())],
             ...Arr::only($this->biodataRules($ignore), array_keys($biodata)),
         ];
 
-        if ($ignore === null) {
+        if ($akunPtk) {
+            $rules['jenis_kelamin'] = ['required', Rule::enum(JenisKelamin::class)];
+        } else {
+            $rules['peran'] = ['present', 'nullable', 'string', Rule::in(Peran::nilaiPanel())];
+        }
+
+        if ($ignore === null && ! $akunPtk) {
             $rules['password'] = self::passwordRules();
         }
 
@@ -898,6 +1050,53 @@ class UserService
     }
 
     /**
+     * Give the staff role $baru (guru or tendik) and take away the other
+     * staff role; panel roles stay. A change is logged as role_berubah with
+     * peran_ptk.
+     */
+    private function aturPeranPtk(User $pelaku, User $user, Peran $baru): void
+    {
+        $user->unsetRelation('roles');
+        $lama = null;
+
+        foreach (Peran::cases() as $peran) {
+            if ($peran->aksesPanel() || ! $user->hasRole($peran->value)) {
+                continue;
+            }
+
+            if ($peran === $baru) {
+                $lama = $peran;
+
+                continue;
+            }
+
+            $lama ??= $peran;
+            $user->removeRole($peran->value);
+        }
+
+        if ($lama === $baru) {
+            return;
+        }
+
+        $user->assignRole($baru->value);
+
+        $this->log(AksiPengguna::RoleBerubah, $pelaku, $user, [
+            'attributes' => ['peran_ptk' => $baru->value],
+            'old' => ['peran_ptk' => $lama?->value],
+        ]);
+    }
+
+    /**
+     * Lock the user's row and read it again, roles included.
+     */
+    private function lockUser(User $user): void
+    {
+        User::query()->whereKey($user->getKey())->lockForUpdate()->first(['id']);
+        $user->refresh();
+        $user->unsetRelation('roles');
+    }
+
+    /**
      * Must run inside a transaction, before a username/email unique check,
      * so two concurrent saves are serialized instead of both passing it.
      */
@@ -906,15 +1105,18 @@ class UserService
         User::query()->lockForUpdate()->get(['id']);
     }
 
-    private function changeStatus(User $pelaku, User $user, bool $statusAktif): void
+    /**
+     * Returns the log entry of the change, or null when nothing changed.
+     */
+    private function changeStatus(User $pelaku, User $user, bool $statusAktif): ?Activity
     {
         if ($user->status_aktif === $statusAktif) {
-            return;
+            return null;
         }
 
         $user->update(['status_aktif' => $statusAktif]);
 
-        $this->log($statusAktif ? AksiPengguna::Diaktifkan : AksiPengguna::Dinonaktifkan, $pelaku, $user, [
+        return $this->log($statusAktif ? AksiPengguna::Diaktifkan : AksiPengguna::Dinonaktifkan, $pelaku, $user, [
             'attributes' => ['status_aktif' => $statusAktif],
             'old' => ['status_aktif' => ! $statusAktif],
         ]);
@@ -952,7 +1154,7 @@ class UserService
      *
      * @param  array{attributes: array<string, mixed>, old?: array<string, mixed>}|null  $changes
      */
-    private function log(AksiPengguna $aksi, ?User $pelaku, User $user, ?array $changes = null): void
+    private function log(AksiPengguna $aksi, ?User $pelaku, User $user, ?array $changes = null): ?Activity
     {
         $logger = activity(self::LOG_NAME);
         $logger = $pelaku === null ? $logger->causedByAnonymous() : $logger->causedBy($pelaku);
@@ -964,7 +1166,9 @@ class UserService
             $logger->withChanges($changes);
         }
 
-        $logger->log($aksi->label());
+        $entry = $logger->log($aksi->label());
+
+        return $entry instanceof Activity ? $entry : null;
     }
 
     private function ensureCanManage(User $pelaku, User $user): void

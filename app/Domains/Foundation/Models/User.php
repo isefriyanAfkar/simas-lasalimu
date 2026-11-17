@@ -9,6 +9,7 @@ use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Policies\UserPolicy;
 use App\Domains\Foundation\Services\KunciNikTidakSiap;
 use App\Domains\Foundation\Services\PenjagaNik;
+use App\Domains\People\Models\Ptk;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -120,6 +122,16 @@ class User extends Authenticatable implements FilamentUser
     public function urlFoto(): ?string
     {
         return $this->foto === null ? null : route('pengguna.foto', ['user' => $this, 'v' => substr(md5($this->foto), 0, 8)]);
+    }
+
+    /**
+     * The staff record (guru or tendik) of this account, if any.
+     *
+     * @return HasOne<Ptk, $this>
+     */
+    public function ptk(): HasOne
+    {
+        return $this->hasOne(Ptk::class);
     }
 
     public function isSuperAdmin(): bool

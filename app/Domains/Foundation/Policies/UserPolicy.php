@@ -61,11 +61,18 @@ class UserPolicy
 
     /**
      * See the user's photo (pengguna.foto route): always one's own, otherwise
-     * whoever may view that user.
+     * whoever may view that user, or that user's staff record (the Guru dan
+     * Staf form shows the photo to operators, who cannot view users).
      */
     public function viewFoto(User $authUser, User $user): bool
     {
-        return $authUser->is($user) || $this->view($authUser, $user);
+        if ($authUser->is($user) || $this->view($authUser, $user)) {
+            return true;
+        }
+
+        $ptk = $user->ptk;
+
+        return $ptk !== null && $authUser->can('view', $ptk);
     }
 
     public function delete(User $authUser, User $user): bool

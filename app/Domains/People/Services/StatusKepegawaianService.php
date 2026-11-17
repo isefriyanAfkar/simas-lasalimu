@@ -71,6 +71,24 @@ class StatusKepegawaianService
         }, self::ATTEMPTS));
     }
 
+    /**
+     * The statuses a staff form may offer, id => nama in display order: the
+     * active ones, plus $saatIni (the status the staff member already holds)
+     * even when it has been deactivated since.
+     *
+     * @return array<int, string>
+     */
+    public function opsiUntukDipilih(?int $saatIni): array
+    {
+        return StatusKepegawaian::query()
+            ->where(fn ($query) => $query
+                ->where('status_aktif', true)
+                ->when($saatIni !== null, fn ($query) => $query->orWhereKey($saatIni)))
+            ->urutanTampilan()
+            ->pluck('nama', 'id')
+            ->all();
+    }
+
     public function deactivate(User $pelaku, StatusKepegawaian $statusKepegawaian): StatusKepegawaian
     {
         return $this->changeStatus($pelaku, $statusKepegawaian, false);

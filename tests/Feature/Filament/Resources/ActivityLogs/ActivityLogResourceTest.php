@@ -10,7 +10,9 @@ use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PengaturanSekolahService;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
+use App\Domains\People\Models\Ptk;
 use App\Domains\People\Models\StatusKepegawaian;
+use App\Domains\People\Services\PtkService;
 use App\Domains\People\Services\StatusKepegawaianService;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
@@ -414,5 +416,26 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnStateSet('objek', 'GTT', $log)
             ->assertTableColumnFormattedStateSet('event', 'Status kepegawaian dinonaktifkan', $log)
             ->assertTableColumnStateSet('rincian', 'status_aktif: aktif → nonaktif', $log);
+    }
+
+    public function test_staff_entries_name_the_staff_member_with_titles(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $ptk = Ptk::factory()
+            ->for(User::factory()->state(['name' => 'Hafida']))
+            ->create(['gelar_depan' => 'Dra.', 'gelar_belakang' => 'S.Pd.']);
+        app(PtkService::class)->ubahStatus($superAdmin, $ptk, [
+            'status' => 'pensiun',
+            'tanggal_keluar' => '2026-01-31',
+            'keterangan_keluar' => 'Pensiun usia',
+        ]);
+        $log = Activity::query()->where('event', 'ptk_status_diubah')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'Dra. Hafida, S.Pd.', $log)
+            ->assertTableColumnFormattedStateSet('event', 'Status guru/staf diubah', $log)
+            ->assertTableColumnStateSet('rincian', 'status: aktif → pensiun; tanggal_keluar: 2026-01-31; keterangan_keluar: Pensiun usia', $log);
     }
 }
