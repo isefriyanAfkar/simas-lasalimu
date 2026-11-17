@@ -87,6 +87,16 @@ class User extends Authenticatable implements FilamentUser
         return $this->nik === null ? null : PenjagaNik::samarkan($this->nik);
     }
 
+    /**
+     * The protected URL of the photo (route pengguna.foto), or null. The
+     * "v" parameter changes with the file, so a replaced photo is not served
+     * from the browser cache.
+     */
+    public function urlFoto(): ?string
+    {
+        return $this->foto === null ? null : route('pengguna.foto', ['user' => $this, 'v' => substr(md5($this->foto), 0, 8)]);
+    }
+
     public function isSuperAdmin(): bool
     {
         return $this->hasRole(Peran::SuperAdmin->value);

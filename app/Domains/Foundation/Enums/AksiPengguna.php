@@ -16,6 +16,7 @@ enum AksiPengguna: string
     case ProfilDiubah = 'profil_diubah';
     case KataSandiDiubahSendiri = 'kata_sandi_diubah_sendiri';
     case NikDitampilkan = 'nik_ditampilkan';
+    case NikDicari = 'nik_dicari';
 
     public function label(): string
     {
@@ -29,6 +30,7 @@ enum AksiPengguna: string
             self::ProfilDiubah => 'Profil diubah',
             self::KataSandiDiubahSendiri => 'Kata sandi diubah sendiri',
             self::NikDitampilkan => 'NIK ditampilkan',
+            self::NikDicari => 'NIK dicari',
         };
     }
 }

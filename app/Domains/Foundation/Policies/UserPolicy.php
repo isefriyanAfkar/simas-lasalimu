@@ -40,12 +40,32 @@ class UserPolicy
     }
 
     /**
-     * Reveal a user's NIK in full ("Tampilkan NIK"). Every use is logged by
-     * UserService::tampilkanNik().
+     * Reveal a user's NIK in full ("Tampilkan NIK"): the ViewNik:User
+     * permission, and only for a user the actor may manage (the same rule as
+     * update), so an operator never sees a super_admin's or another
+     * operator's NIK. Every use is logged by UserService::tampilkanNik().
      */
     public function viewNik(User $authUser, User $user): bool
     {
+        return $authUser->can('ViewNik:User') && $this->userService->canManage($authUser, $user);
+    }
+
+    /**
+     * Look a user up by NIK ("Cari NIK"). A match the actor may not reveal
+     * is reported as no match by UserService::cariNik().
+     */
+    public function searchNik(User $authUser): bool
+    {
         return $authUser->can('ViewNik:User');
+    }
+
+    /**
+     * See the user's photo (pengguna.foto route): always one's own, otherwise
+     * whoever may view that user.
+     */
+    public function viewFoto(User $authUser, User $user): bool
+    {
+        return $authUser->is($user) || $this->view($authUser, $user);
     }
 
     public function delete(User $authUser, User $user): bool

@@ -135,7 +135,7 @@ class EditProfileTest extends TestCase
 
     public function test_user_changes_own_phone_address_and_photo(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $operator = $this->operatorWithBiodata();
         $this->actingAs($operator);
 
@@ -152,7 +152,7 @@ class EditProfileTest extends TestCase
         $this->assertSame('6281299998888', $operator->no_hp);
         $this->assertSame('Jl. Baru', $operator->alamat);
         $this->assertStringStartsWith('foto-pengguna/', (string) $operator->foto);
-        Storage::disk('public')->assertExists((string) $operator->foto);
+        Storage::disk('local')->assertExists((string) $operator->foto);
     }
 
     public function test_a_forged_request_cannot_change_the_nik_or_locked_biodata(): void

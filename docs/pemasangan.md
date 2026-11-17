@@ -107,6 +107,12 @@ php artisan storage:link
 
 Logo sekolah disimpan di `storage/app/public` dan disajikan lewat `public/storage`.
 
+Foto pengguna disimpan di `storage/app/private/foto-pengguna`. Folder itu
+tidak bisa dibuka lewat URL publik. Foto hanya tampil lewat aplikasi kepada
+pengguna yang sudah login dan berhak melihatnya. Jangan memindahkan atau
+menautkan folder ini ke `public/`. Folder ini tidak ada di backup database,
+jadi cadangkan bersama berkas `storage/`.
+
 Folder `storage/` dan `bootstrap/cache/` harus bisa ditulis oleh pengguna yang
 menjalankan PHP di server web. Kalau tidak, halaman gagal dimuat dan unggahan
 logo gagal disimpan.

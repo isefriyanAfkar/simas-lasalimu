@@ -47,10 +47,12 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  * - jenis_kelamin and agama are values of their enums
  * - tanggal_lahir is a Y-m-d date before today
  * - no_hp is normalized to 62xxx (08xx and +62xx are accepted; spaces,
- *   dashes, dots and brackets are dropped) and has 10 to 15 digits
+ *   dashes, dots and brackets are dropped), has 10 to 15 digits and no 0
+ *   right after 62
  * - foto is the current path, or a JPG, PNG or WebP of at most 1 MB inside
- *   FOTO_DIRECTORY on FOTO_DISK; a replaced or removed photo is deleted after
- *   the transaction commits, and only inside FOTO_DIRECTORY
+ *   FOTO_DIRECTORY on the private FOTO_DISK that no other user has; a
+ *   replaced or removed photo is deleted after the transaction commits, and
+ *   only inside FOTO_DIRECTORY
  * On update a biodata key that is not sent keeps its stored value.
  *
  * Every successful write is recorded in the activity log (log "pengguna") in
@@ -58,7 +60,8 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  * name) are ever written to the log with their values, so passwords and
  * remember tokens never reach it. nik and foto appear only as a marker word
  * (diisi/diubah/dihapus, diunggah/diganti/dihapus), never as a value or path.
- * Revealing a NIK (tampilkanNik) is logged too, without the NIK.
+ * Revealing a NIK (tampilkanNik) and searching by NIK (cariNik) are logged
+ * too, without the NIK.
  *
  * Password contract: the two password paths hand over different forms, and
  * both are correct because User casts `password` as `hashed`, which hashes a
@@ -95,7 +98,11 @@ class UserService
         'users_nik_hash_unique' => ['nik', 'NIK ini baru saja didaftarkan untuk pengguna lain. Periksa lagi, lalu simpan.'],
     ];
 
-    public const string FOTO_DISK = 'public';
+    /**
+     * The private disk (storage/app/private): photos are served only through
+     * the pengguna.foto route, which checks UserPolicy::viewFoto.
+     */
+    public const string FOTO_DISK = 'local';
 
     public const string FOTO_DIRECTORY = 'foto-pengguna';
 
@@ -109,6 +116,8 @@ class UserService
     public const string PESAN_FOTO = 'Foto tidak valid. Unggah JPG, PNG, atau WebP paling besar 1 MB.';
 
     public const string PESAN_KUNCI_NIK = 'NIK belum bisa disimpan: kunci NIK belum diatur di server.';
+
+    public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
     /**
      * Logged with their old and new values. nik and foto are deliberately
@@ -349,9 +358,55 @@ class UserService
     }
 
     /**
+     * Find the user whose NIK is $nik, through nik_hash, for someone holding
+     * ViewNik:User (UserPolicy searchNik). A match the searcher may not
+     * reveal (UserPolicy viewNik) is reported as no match, so the search
+     * never tells who owns a NIK beyond what "Tampilkan NIK" would. Every
+     * search is logged ("NIK dicari", subject = the user returned, if any);
+     * the log never holds the NIK or its hash.
+     *
+     * @throws AuthorizationException
+     * @throws ValidationException when $nik is not 16 digits or the NIK key is not set
+     */
+    public function cariNik(User $pelaku, string $nik): ?User
+    {
+        if (! $pelaku->can('searchNik', User::class)) {
+            throw new AuthorizationException('Anda tidak berizin mencari NIK.');
+        }
+
+        $nik = trim($nik);
+
+        Validator::make(['nik' => $nik], ['nik' => ['required', 'regex:/^\d{16}$/']], self::BIODATA_MESSAGES, self::BIODATA_ATTRIBUTES)->validate();
+
+        try {
+            $user = User::query()->denganNik($nik)->first();
+        } catch (KunciNikTidakSiap) {
+            throw ValidationException::withMessages(['nik' => self::PESAN_KUNCI_NIK_CARI]);
+        }
+
+        if ($user !== null && ! $pelaku->can('viewNik', $user)) {
+            $user = null;
+        }
+
+        DB::transaction(function () use ($pelaku, $user): void {
+            $logger = activity(self::LOG_NAME)
+                ->causedBy($pelaku)
+                ->event(AksiPengguna::NikDicari->value);
+
+            if ($user !== null) {
+                $logger->performedOn($user);
+            }
+
+            $logger->log(AksiPengguna::NikDicari->label());
+        });
+
+        return $user;
+    }
+
+    /**
      * Return the user's NIK in full to someone allowed to see it (UserPolicy
-     * viewNik, permission ViewNik:User) and log who saw whose NIK, when. The
-     * log entry never holds the NIK.
+     * viewNik: permission ViewNik:User and allowed to manage that user) and
+     * log who saw whose NIK, when. The log entry never holds the NIK.
      *
      * @throws AuthorizationException
      */
@@ -613,9 +668,13 @@ class UserService
             'tanggal_lahir' => ['nullable', 'date_format:Y-m-d', 'before:today'],
             'agama' => ['nullable', Rule::enum(Agama::class)],
             'alamat' => ['nullable', 'string', 'max:1000'],
-            'no_hp' => ['nullable', 'string', 'regex:/^62\d{8,13}$/'],
-            'foto' => ['nullable', 'string', 'max:255', function (string $attribute, mixed $value, Closure $fail) use ($currentFoto): void {
-                if ($value !== $currentFoto && ! $this->isStoredPhoto((string) $value)) {
+            'no_hp' => ['nullable', 'string', 'regex:/^62[1-9]\d{7,12}$/'],
+            'foto' => ['nullable', 'string', 'max:255', function (string $attribute, mixed $value, Closure $fail) use ($currentFoto, $ignore): void {
+                if ($value === $currentFoto) {
+                    return;
+                }
+
+                if (! $this->isStoredPhoto((string) $value) || $this->isPhotoOfAnotherUser((string) $value, $ignore)) {
                     $fail(self::PESAN_FOTO);
                 }
             }],
@@ -761,6 +820,35 @@ class UserService
         }
 
         return in_array((new finfo(FILEINFO_MIME_TYPE))->buffer((string) $disk->get($path)), self::FOTO_MIME, true);
+    }
+
+    /**
+     * Another account already points at this file. Accepting it would let a
+     * tampered form take over someone else's photo, and the next replacement
+     * on either account would delete it from under the other.
+     */
+    private function isPhotoOfAnotherUser(string $path, ?User $ignore): bool
+    {
+        return User::query()
+            ->where('foto', $path)
+            ->when($ignore, fn ($query) => $query->whereKeyNot($ignore?->getKey()))
+            ->exists();
+    }
+
+    /**
+     * The path of the user's photo when it may be served: inside
+     * FOTO_DIRECTORY and present on FOTO_DISK. Used by the pengguna.foto
+     * route, which never serves anything else.
+     */
+    public function pathFotoUntukDisajikan(User $user): ?string
+    {
+        $foto = $user->foto;
+
+        if ($foto === null || ! $this->isInPhotoDirectory($foto) || ! Storage::disk(self::FOTO_DISK)->exists($foto)) {
+            return null;
+        }
+
+        return $foto;
     }
 
     private function isInPhotoDirectory(string $path): bool

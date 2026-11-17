@@ -47,7 +47,11 @@ class EditUser extends EditRecord
                     /** @var User $pelaku */
                     $pelaku = Filament::auth()->user();
 
-                    $this->nikTerbuka = app(UserService::class)->tampilkanNik($pelaku, $record);
+                    try {
+                        $this->nikTerbuka = app(UserService::class)->tampilkanNik($pelaku, $record);
+                    } catch (PelanggaranAturanPengguna $exception) {
+                        Notification::make()->danger()->title($exception->getMessage())->send();
+                    }
                 }),
         ];
     }

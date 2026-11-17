@@ -188,6 +188,9 @@ class UserServiceBiodataTest extends TestCase
             'kode negara lain' => ['+1 555 123 4567'],
             'ada huruf' => ['0812abc34567'],
             'hanya tanda' => ['+-'],
+            'nol setelah +62' => ['+62 0812 3456 7890'],
+            'awalan 0062' => ['0062 812 3456 7890'],
+            'nol setelah 62' => ['6208123456789'],
         ];
     }
 
@@ -363,7 +366,7 @@ class UserServiceBiodataTest extends TestCase
 
     public function test_accepts_a_photo_stored_in_the_photo_folder(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('foto-pengguna/budi.png');
 
         $user = $this->create(['foto' => 'foto-pengguna/budi.png']);
@@ -390,11 +393,11 @@ class UserServiceBiodataTest extends TestCase
     #[DataProvider('fotoTidakValid')]
     public function test_rejects_an_invalid_photo(string $path): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('lain/budi.png');
-        Storage::disk('public')->put('foto-pengguna/dokumen.png', 'bukan gambar');
-        Storage::disk('public')->put('foto-pengguna/animasi.gif', UploadedFile::fake()->image('animasi.gif')->getContent());
-        Storage::disk('public')->put('foto-pengguna/besar.png', UploadedFile::fake()->image('besar.png')->getContent().str_repeat("\0", 1024 * 1024));
+        Storage::disk('local')->put('foto-pengguna/dokumen.png', 'bukan gambar');
+        Storage::disk('local')->put('foto-pengguna/animasi.gif', UploadedFile::fake()->image('animasi.gif')->getContent());
+        Storage::disk('local')->put('foto-pengguna/besar.png', UploadedFile::fake()->image('besar.png')->getContent().str_repeat("\0", 1024 * 1024));
 
         $exception = $this->captureValidation(fn () => $this->create(['foto' => $path]));
 
@@ -403,9 +406,9 @@ class UserServiceBiodataTest extends TestCase
 
     public function test_accepts_a_photo_of_exactly_one_megabyte(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $image = UploadedFile::fake()->image('pas.png')->getContent();
-        Storage::disk('public')->put('foto-pengguna/pas.png', $image.str_repeat("\0", 1024 * 1024 - strlen($image)));
+        Storage::disk('local')->put('foto-pengguna/pas.png', $image.str_repeat("\0", 1024 * 1024 - strlen($image)));
 
         $user = $this->create(['foto' => 'foto-pengguna/pas.png']);
 
@@ -414,32 +417,32 @@ class UserServiceBiodataTest extends TestCase
 
     public function test_deletes_the_old_photo_when_it_is_replaced(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('foto-pengguna/lama.png');
         $this->putImage('foto-pengguna/baru.png');
         $user = $this->create(['foto' => 'foto-pengguna/lama.png']);
 
         $this->update($user, ['foto' => 'foto-pengguna/baru.png']);
 
-        Storage::disk('public')->assertMissing('foto-pengguna/lama.png');
-        Storage::disk('public')->assertExists('foto-pengguna/baru.png');
+        Storage::disk('local')->assertMissing('foto-pengguna/lama.png');
+        Storage::disk('local')->assertExists('foto-pengguna/baru.png');
     }
 
     public function test_deletes_the_old_photo_when_it_is_removed(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('foto-pengguna/lama.png');
         $user = $this->create(['foto' => 'foto-pengguna/lama.png']);
 
         $this->update($user, ['foto' => null]);
 
         $this->assertNull($user->fresh()->foto);
-        Storage::disk('public')->assertMissing('foto-pengguna/lama.png');
+        Storage::disk('local')->assertMissing('foto-pengguna/lama.png');
     }
 
     public function test_keeps_the_old_photo_when_saving_fails(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('foto-pengguna/lama.png');
         $this->putImage('foto-pengguna/baru.png');
         $user = $this->create(['foto' => 'foto-pengguna/lama.png']);
@@ -447,12 +450,12 @@ class UserServiceBiodataTest extends TestCase
         $this->captureValidation(fn () => $this->update($user, ['foto' => 'foto-pengguna/baru.png', 'no_hp' => 'salah']));
 
         $this->assertSame('foto-pengguna/lama.png', $user->fresh()->foto);
-        Storage::disk('public')->assertExists('foto-pengguna/lama.png');
+        Storage::disk('local')->assertExists('foto-pengguna/lama.png');
     }
 
     public function test_never_deletes_an_old_photo_outside_the_photo_folder(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('lain/penting.png');
         $this->putImage('foto-pengguna/baru.png');
         $user = $this->create([]);
@@ -460,7 +463,7 @@ class UserServiceBiodataTest extends TestCase
 
         $this->update($user->fresh(), ['foto' => 'foto-pengguna/baru.png']);
 
-        Storage::disk('public')->assertExists('lain/penting.png');
+        Storage::disk('local')->assertExists('lain/penting.png');
     }
 
     public function test_the_activity_log_never_holds_the_nik_or_its_ciphertext(): void
@@ -499,7 +502,7 @@ class UserServiceBiodataTest extends TestCase
 
     public function test_logs_photo_changes_as_markers_without_paths(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('foto-pengguna/lama.png');
         $this->putImage('foto-pengguna/baru.png');
         $user = $this->create(['foto' => 'foto-pengguna/lama.png']);
@@ -541,7 +544,7 @@ class UserServiceBiodataTest extends TestCase
     public function test_an_operator_with_view_nik_permission_reveals_the_nik_and_it_is_logged(): void
     {
         $operator = User::factory()->operator()->create();
-        $user = $this->create(['nik' => self::NIK]);
+        $user = $this->userWithoutRole(self::NIK);
 
         $nik = $this->service()->tampilkanNik($operator, $user);
 
@@ -578,6 +581,132 @@ class UserServiceBiodataTest extends TestCase
         $this->assertFalse(Activity::query()->where('event', 'nik_ditampilkan')->exists());
     }
 
+    public function test_an_operator_cannot_reveal_the_nik_of_a_user_it_may_not_manage(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $superAdmin = User::factory()->superAdmin()->create();
+        $superAdmin->isiNik(self::NIK);
+        $superAdmin->save();
+        $otherOperator = $this->create(['nik' => self::NIK_LAIN], 'operator.lain');
+
+        foreach ([$superAdmin, $otherOperator] as $target) {
+            try {
+                $this->service()->tampilkanNik($operator, $target);
+                $this->fail('Expected AuthorizationException.');
+            } catch (AuthorizationException) {
+                // expected
+            }
+        }
+
+        $this->assertFalse(Activity::query()->where('event', 'nik_ditampilkan')->exists());
+    }
+
+    public function test_an_operator_may_reveal_its_own_nik(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $operator->isiNik(self::NIK);
+        $operator->save();
+
+        $this->assertSame(self::NIK, $this->service()->tampilkanNik($operator, $operator));
+    }
+
+    public function test_cari_nik_finds_the_user_through_the_hash_and_logs_without_the_nik(): void
+    {
+        $superAdmin = $this->superAdmin();
+        $user = $this->create(['nik' => self::NIK]);
+
+        $found = $this->service()->cariNik($superAdmin, ' '.self::NIK.' ');
+
+        $this->assertTrue($found?->is($user));
+
+        $activity = Activity::query()->where('event', 'nik_dicari')->sole();
+        $this->assertSame('pengguna', $activity->log_name);
+        $this->assertSame('NIK dicari', $activity->description);
+        $this->assertTrue($activity->causer?->is($superAdmin));
+        $this->assertTrue($activity->subject?->is($user));
+        $this->assertStringNotContainsString(self::NIK, DB::table('activity_log')->get()->toJson());
+        $this->assertStringNotContainsString(self::NIK_HASH, DB::table('activity_log')->get()->toJson());
+    }
+
+    public function test_cari_nik_without_a_match_returns_null_and_still_logs(): void
+    {
+        $superAdmin = $this->superAdmin();
+        $this->create(['nik' => self::NIK]);
+
+        $this->assertNull($this->service()->cariNik($superAdmin, self::NIK_LAIN));
+
+        $activity = Activity::query()->where('event', 'nik_dicari')->sole();
+        $this->assertTrue($activity->causer?->is($superAdmin));
+        $this->assertNull($activity->subject_id);
+        $this->assertStringNotContainsString(self::NIK_LAIN, DB::table('activity_log')->get()->toJson());
+    }
+
+    public function test_cari_nik_hides_a_user_the_searcher_may_not_manage(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $superAdmin = User::factory()->superAdmin()->create();
+        $superAdmin->isiNik(self::NIK);
+        $superAdmin->save();
+        $managed = $this->userWithoutRole(self::NIK_LAIN);
+
+        $this->assertNull($this->service()->cariNik($operator, self::NIK));
+        $this->assertTrue($this->service()->cariNik($operator, self::NIK_LAIN)?->is($managed));
+        $this->assertSame(1, Activity::query()->where('event', 'nik_dicari')->whereNull('subject_id')->count());
+    }
+
+    public function test_cari_nik_requires_the_view_nik_permission(): void
+    {
+        $tanpaRole = User::factory()->create();
+
+        $this->expectException(AuthorizationException::class);
+
+        try {
+            $this->service()->cariNik($tanpaRole, self::NIK);
+        } finally {
+            $this->assertFalse(Activity::query()->where('event', 'nik_dicari')->exists());
+        }
+    }
+
+    public function test_cari_nik_rejects_an_invalid_nik_without_echoing_it_or_logging(): void
+    {
+        $exception = $this->captureValidation(fn () => $this->service()->cariNik($this->superAdmin(), '740401234567000'));
+
+        $this->assertSame(['NIK harus terdiri dari tepat 16 digit angka.'], $exception->errors()['nik']);
+        $this->assertFalse(Activity::query()->where('event', 'nik_dicari')->exists());
+    }
+
+    public function test_cari_nik_without_the_hmac_key_is_a_field_error(): void
+    {
+        config(['simas.nik_hmac_key' => null]);
+
+        $exception = $this->captureValidation(fn () => $this->service()->cariNik($this->superAdmin(), self::NIK));
+
+        $this->assertSame(['NIK belum bisa dicari: kunci NIK belum diatur di server.'], $exception->errors()['nik']);
+    }
+
+    public function test_rejects_a_photo_that_belongs_to_another_user(): void
+    {
+        Storage::fake('local');
+        $this->putImage('foto-pengguna/milik-siti.png');
+        $siti = $this->create(['foto' => 'foto-pengguna/milik-siti.png'], 'siti');
+        $budi = $this->create([]);
+
+        $exception = $this->captureValidation(fn () => $this->update($budi, ['foto' => 'foto-pengguna/milik-siti.png']));
+        $this->assertSame([UserService::PESAN_FOTO], $exception->errors()['foto']);
+
+        $exception = $this->captureValidation(fn () => $this->service()->updateOwnProfile($budi, ['name' => $budi->name, 'foto' => 'foto-pengguna/milik-siti.png']));
+        $this->assertSame([UserService::PESAN_FOTO], $exception->errors()['foto']);
+
+        $this->assertNull($budi->fresh()->foto);
+        $this->assertSame('foto-pengguna/milik-siti.png', $siti->fresh()->foto);
+    }
+
+    public function test_photos_are_stored_on_the_private_disk(): void
+    {
+        $this->assertSame('local', UserService::FOTO_DISK);
+        $this->assertStringNotContainsString(storage_path('app/public'), Storage::disk(UserService::FOTO_DISK)->path('foto-pengguna/x.png'));
+    }
+
     public function test_revealing_a_missing_nik_is_rejected(): void
     {
         $user = $this->create([]);
@@ -590,7 +719,7 @@ class UserServiceBiodataTest extends TestCase
 
     public function test_own_profile_changes_phone_address_and_photo(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->putImage('foto-pengguna/lama.png');
         $this->putImage('foto-pengguna/baru.png');
         $user = $this->create(['foto' => 'foto-pengguna/lama.png', 'no_hp' => '081234567890']);
@@ -606,7 +735,7 @@ class UserServiceBiodataTest extends TestCase
         $this->assertSame('6281299998888', $user->no_hp);
         $this->assertSame('Jl. Baru', $user->alamat);
         $this->assertSame('foto-pengguna/baru.png', $user->foto);
-        Storage::disk('public')->assertMissing('foto-pengguna/lama.png');
+        Storage::disk('local')->assertMissing('foto-pengguna/lama.png');
 
         $activity = $this->latestActivity('profil_diubah', $user);
         $this->assertSame(['no_hp' => '6281299998888', 'alamat' => 'Jl. Baru', 'foto' => 'diganti'], $activity->attribute_changes['attributes']);
@@ -645,7 +774,7 @@ class UserServiceBiodataTest extends TestCase
 
     public function test_own_profile_validates_phone_and_photo(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $user = $this->create(['no_hp' => '081234567890']);
 
         $exception = $this->captureValidation(fn () => $this->service()->updateOwnProfile($user, [
@@ -697,6 +826,18 @@ class UserServiceBiodataTest extends TestCase
         ]);
     }
 
+    /**
+     * A user an operator may manage (no role).
+     */
+    private function userWithoutRole(string $nik): User
+    {
+        $user = User::factory()->create();
+        $user->isiNik($nik);
+        $user->save();
+
+        return $user;
+    }
+
     private function superAdmin(): User
     {
         return User::query()->role(Peran::SuperAdmin->value)->first()
@@ -705,7 +846,7 @@ class UserServiceBiodataTest extends TestCase
 
     private function putImage(string $path): void
     {
-        Storage::disk('public')->put($path, UploadedFile::fake()->image(basename($path))->getContent());
+        Storage::disk('local')->put($path, UploadedFile::fake()->image(basename($path))->getContent());
     }
 
     private function captureValidation(callable $operation): ValidationException

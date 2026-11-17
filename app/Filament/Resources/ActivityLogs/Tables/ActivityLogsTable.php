@@ -25,9 +25,13 @@ use Spatie\Activitylog\Models\Activity;
 class ActivityLogsTable
 {
     /**
-     * Attributes logged only as a marker word (UserService), never as a
-     * value: shown as "NIK diubah", "foto diganti".
-     *
+     * Attributes the user log (log "pengguna", UserService) records only as a
+     * marker word, never as a value: shown as "NIK diubah", "foto diganti".
+     * Other logs show these attribute names as ordinary values.
+     */
+    private const string LOG_PENANDA = 'pengguna';
+
+    /**
      * @var array<string, string>
      */
     private const array PENANDA = [
@@ -136,7 +140,7 @@ class ActivityLogsTable
      * "field: old → new" per changed attribute, or "field: value" when there is
      * no old value, followed by "menggantikan <label>" for an activation that
      * replaced another period. A deletion has only old values; they are shown
-     * as "field: value". nik and foto are markers: "NIK diubah".
+     * as "field: value". In the user log nik and foto are markers: "NIK diubah".
      */
     private static function describeChanges(Activity $activity): ?string
     {
@@ -151,7 +155,7 @@ class ActivityLogsTable
         $parts = [];
 
         foreach ($new as $attribute => $value) {
-            if (array_key_exists($attribute, self::PENANDA)) {
+            if ($activity->log_name === self::LOG_PENANDA && array_key_exists($attribute, self::PENANDA)) {
                 $parts[] = self::PENANDA[$attribute].' '.$value;
 
                 continue;

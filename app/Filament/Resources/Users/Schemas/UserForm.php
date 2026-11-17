@@ -18,6 +18,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Component;
 
 /**
@@ -108,6 +109,8 @@ class UserForm
 
     /**
      * Shared with the profile page. UserService checks the stored file again.
+     * Files go to the private disk; the preview of a stored photo uses the
+     * protected pengguna.foto route instead of a signed temporary URL.
      */
     public static function fotoField(): FileUpload
     {
@@ -117,10 +120,30 @@ class UserForm
             ->avatar()
             ->disk(UserService::FOTO_DISK)
             ->directory(UserService::FOTO_DIRECTORY)
-            ->visibility('public')
+            ->visibility('private')
             ->acceptedFileTypes(UserService::FOTO_MIME)
             ->maxSize(UserService::FOTO_MAKS_KB)
+            ->getUploadedFileUsing(fn (string $file, ?User $record): ?array => self::storedPhoto($file, $record))
             ->helperText('JPG, PNG, atau WebP, paling besar 1 MB.');
+    }
+
+    /**
+     * @return array{name: string, size: int, type: ?string, url: ?string}|null
+     */
+    private static function storedPhoto(string $file, ?User $record): ?array
+    {
+        if ($record === null || $record->foto !== $file) {
+            return null;
+        }
+
+        $disk = Storage::disk(UserService::FOTO_DISK);
+
+        return [
+            'name' => basename($file),
+            'size' => (int) $disk->size($file),
+            'type' => $disk->mimeType($file) ?: null,
+            'url' => $record->urlFoto(),
+        ];
     }
 
     /**

@@ -6,6 +6,8 @@ use App\Domains\Foundation\Enums\Agama;
 use App\Domains\Foundation\Enums\JenisKelamin;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
+use App\Domains\Foundation\Services\UserService;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
 use App\Filament\Resources\Users\Pages\ListUsers;
@@ -16,7 +18,10 @@ use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Attributes\Url;
 use Livewire\Livewire;
+use Mockery\MockInterface;
+use ReflectionObject;
 use Spatie\Activitylog\Models\Activity;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -39,7 +44,7 @@ class UserBiodataResourceTest extends TestCase
 
     public function test_super_admin_creates_a_user_with_biodata_and_photo(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->actingAs(User::factory()->superAdmin()->create());
 
         Livewire::test(CreateUser::class)
@@ -67,7 +72,7 @@ class UserBiodataResourceTest extends TestCase
         $this->assertSame(Agama::Islam, $user->agama);
         $this->assertSame('6281234567890', $user->no_hp);
         $this->assertStringStartsWith('foto-pengguna/', (string) $user->foto);
-        Storage::disk('public')->assertExists((string) $user->foto);
+        Storage::disk('local')->assertExists((string) $user->foto);
     }
 
     public function test_service_errors_land_on_the_biodata_fields(): void
@@ -222,28 +227,139 @@ class UserBiodataResourceTest extends TestCase
             ->assertDontSee('7404********0001');
     }
 
-    public function test_searching_a_full_nik_finds_the_user_through_the_hash(): void
+    public function test_the_table_search_box_never_matches_a_nik(): void
     {
         $this->actingAs(User::factory()->superAdmin()->create());
         $user = $this->userWithNik(self::NIK);
-        $other = $this->userWithNik(self::NIK_LAIN, 'lain');
 
         Livewire::test(ListUsers::class)
-            ->searchTable(self::NIK)
-            ->assertCanSeeTableRecords([$user])
-            ->assertCanNotSeeTableRecords([$other]);
-    }
-
-    public function test_searching_a_nik_finds_nothing_without_the_view_nik_permission(): void
-    {
-        $admin = $this->operatorWithoutViewNik(['ViewAny:User']);
-        $this->actingAs($admin);
-        $user = $this->userWithNik(self::NIK);
-
-        Livewire::test(ListUsers::class)
-            ->assertCanSeeTableRecords([$user])
             ->searchTable(self::NIK)
             ->assertCanNotSeeTableRecords([$user]);
+    }
+
+    public function test_cari_nik_shows_the_matching_user_without_the_nik_and_logs_it(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $this->actingAs($superAdmin);
+        $user = $this->userWithNik(self::NIK);
+        $this->userWithNik(self::NIK_LAIN, 'lain');
+
+        $component = Livewire::test(ListUsers::class)
+            ->callAction('cariNik', data: ['nik' => self::NIK])
+            ->assertHasNoActionErrors()
+            ->assertNotified('NIK ditemukan: Budi Santoso (budi)');
+
+        $this->assertNikNotInUrlState($component->instance());
+        $this->assertSame('', $component->get('tableSearch'));
+
+        $activity = Activity::query()->where('event', 'nik_dicari')->sole();
+        $this->assertTrue($activity->causer?->is($superAdmin));
+        $this->assertTrue($activity->subject?->is($user));
+    }
+
+    public function test_cari_nik_without_a_match_says_so(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        $component = Livewire::test(ListUsers::class)
+            ->callAction('cariNik', data: ['nik' => self::NIK])
+            ->assertHasNoActionErrors()
+            ->assertNotified('Tidak ada pengguna dengan NIK ini.');
+
+        $this->assertNikNotInUrlState($component->instance());
+    }
+
+    public function test_cari_nik_shows_an_invalid_nik_as_a_field_error(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        $component = Livewire::test(ListUsers::class)
+            ->callAction('cariNik', data: ['nik' => '123'])
+            ->assertHasActionErrors(['nik']);
+
+        $this->assertNikNotInUrlState($component->instance(), '123');
+        $this->assertFalse(Activity::query()->where('event', 'nik_dicari')->exists());
+    }
+
+    public function test_cari_nik_is_hidden_without_the_view_nik_permission(): void
+    {
+        $this->actingAs($this->operatorWithoutViewNik(['ViewAny:User']));
+
+        Livewire::test(ListUsers::class)
+            ->assertOk()
+            ->assertActionHidden('cariNik');
+    }
+
+    public function test_cari_nik_is_offered_to_an_operator_with_view_nik(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $operator->givePermissionTo(['ViewAny:User']);
+        $this->actingAs($operator);
+
+        Livewire::test(ListUsers::class)
+            ->assertActionVisible('cariNik');
+    }
+
+    public function test_tampilkan_nik_is_hidden_for_a_user_the_operator_may_not_manage(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $operator->givePermissionTo(['ViewAny:User', 'View:User', 'Update:User']);
+        $this->actingAs($operator);
+
+        Livewire::test(EditUser::class, ['record' => $operator->getRouteKey()])
+            ->assertActionHidden('tampilkanNik');
+
+        $operator->isiNik(self::NIK);
+        $operator->save();
+
+        Livewire::test(EditUser::class, ['record' => $operator->getRouteKey()])
+            ->assertActionVisible('tampilkanNik');
+    }
+
+    public function test_tampilkan_nik_turns_a_rule_violation_into_a_notification(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $user = $this->userWithNik(self::NIK);
+        $this->partialMock(UserService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('tampilkanNik')->andThrow(PelanggaranAturanPengguna::nikKosong());
+        });
+
+        Livewire::test(EditUser::class, ['record' => $user->getRouteKey()])
+            ->callAction('tampilkanNik')
+            ->assertNotified('Pengguna ini belum punya NIK.')
+            ->assertSet('nikTerbuka', null);
+    }
+
+    public function test_list_photo_column_points_to_the_protected_photo_route(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('foto-pengguna/budi.png', UploadedFile::fake()->image('budi.png')->getContent());
+        $this->actingAs(User::factory()->superAdmin()->create());
+        $user = User::factory()->create(['foto' => 'foto-pengguna/budi.png']);
+
+        Livewire::test(ListUsers::class)
+            ->assertTableColumnStateSet('foto', $user->urlFoto(), $user)
+            ->assertDontSee('foto-pengguna/budi.png');
+
+        $this->assertStringStartsWith(route('pengguna.foto', $user), (string) $user->urlFoto());
+    }
+
+    /**
+     * Every property Livewire binds to the query string (#[Url]) must stay
+     * free of the NIK.
+     */
+    private function assertNikNotInUrlState(object $component, string $nik = self::NIK): void
+    {
+        $urlState = [];
+
+        foreach ((new ReflectionObject($component))->getProperties() as $property) {
+            if ($property->getAttributes(Url::class) !== []) {
+                $urlState[$property->getName()] = $property->getValue($component);
+            }
+        }
+
+        $this->assertArrayHasKey('tableSearch', $urlState);
+        $this->assertStringNotContainsString($nik, json_encode($urlState, JSON_THROW_ON_ERROR));
     }
 
     public function test_searching_by_name_still_works(): void

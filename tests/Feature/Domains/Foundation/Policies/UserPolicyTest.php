@@ -58,6 +58,36 @@ class UserPolicyTest extends TestCase
         $this->assertFalse(User::factory()->create()->can('viewNik', $user));
     }
 
+    public function test_view_nik_follows_the_same_rule_as_managing_the_user(): void
+    {
+        $operator = User::factory()->operator()->create();
+
+        $this->assertTrue($operator->can('viewNik', $operator));
+        $this->assertFalse($operator->can('viewNik', User::factory()->superAdmin()->create()));
+        $this->assertFalse($operator->can('viewNik', User::factory()->operator()->create()));
+        $this->assertTrue(User::factory()->superAdmin()->create()->can('viewNik', User::factory()->superAdmin()->create()));
+    }
+
+    public function test_search_nik_needs_only_the_view_nik_permission(): void
+    {
+        $this->assertTrue(User::factory()->operator()->create()->can('searchNik', User::class));
+        $this->assertTrue(User::factory()->superAdmin()->create()->can('searchNik', User::class));
+        $this->assertFalse(User::factory()->create()->can('searchNik', User::class));
+    }
+
+    public function test_view_foto_allows_the_owner_and_whoever_may_view_the_user(): void
+    {
+        $user = User::factory()->create();
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo('View:User');
+
+        $this->assertTrue($user->can('viewFoto', $user));
+        $this->assertTrue($viewer->can('viewFoto', $user));
+        $this->assertTrue(User::factory()->superAdmin()->create()->can('viewFoto', $user));
+        $this->assertFalse(User::factory()->operator()->create()->can('viewFoto', $user));
+        $this->assertFalse(User::factory()->create()->can('viewFoto', $user));
+    }
+
     public function test_view_nik_follows_the_view_nik_permission(): void
     {
         $user = User::factory()->create();

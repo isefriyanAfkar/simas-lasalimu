@@ -199,9 +199,9 @@ class ActivityLogResourceTest extends TestCase
 
     public function test_nik_and_photo_changes_show_as_words_without_values(): void
     {
-        Storage::fake('public');
-        Storage::disk('public')->put('foto-pengguna/lama.png', UploadedFile::fake()->image('lama.png')->getContent());
-        Storage::disk('public')->put('foto-pengguna/baru.png', UploadedFile::fake()->image('baru.png')->getContent());
+        Storage::fake('local');
+        Storage::disk('local')->put('foto-pengguna/lama.png', UploadedFile::fake()->image('lama.png')->getContent());
+        Storage::disk('local')->put('foto-pengguna/baru.png', UploadedFile::fake()->image('baru.png')->getContent());
         $superAdmin = User::factory()->superAdmin()->create();
         $user = User::factory()->operator()->create(['username' => 'siti', 'foto' => 'foto-pengguna/lama.png']);
         $user->isiNik('7404012345670001');
@@ -226,6 +226,39 @@ class ActivityLogResourceTest extends TestCase
             ->assertDontSee('7404012345670001')
             ->assertDontSee('7404012345670002')
             ->assertDontSee('foto-pengguna/');
+    }
+
+    public function test_nik_and_photo_markers_apply_only_to_the_user_log(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        activity('lain')
+            ->causedBy($superAdmin)
+            ->event('diubah')
+            ->withChanges(['attributes' => ['foto' => 'galeri/a.png']])
+            ->log('Lain diubah');
+        $activity = Activity::query()->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('rincian', 'foto: galeri/a.png', $activity);
+    }
+
+    public function test_searching_a_nik_shows_in_the_log_without_the_nik(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create(['name' => 'Kepala TU']);
+        $user = User::factory()->operator()->create(['username' => 'siti']);
+        $user->isiNik('7404012345670001');
+        $user->save();
+        app(UserService::class)->cariNik($superAdmin, '7404012345670001');
+        $activity = Activity::query()->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnFormattedStateSet('event', 'NIK dicari', $activity)
+            ->assertTableColumnStateSet('objek', 'siti', $activity)
+            ->assertDontSee('7404012345670001');
     }
 
     public function test_revealing_a_nik_shows_who_saw_whose_nik(): void
