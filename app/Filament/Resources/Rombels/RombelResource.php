@@ -6,6 +6,7 @@ use App\Domains\Academic\Models\Rombel;
 use App\Filament\Resources\Rombels\Pages\CreateRombel;
 use App\Filament\Resources\Rombels\Pages\EditRombel;
 use App\Filament\Resources\Rombels\Pages\ListRombels;
+use App\Filament\Resources\Rombels\RelationManagers\AnggotaRelationManager;
 use App\Filament\Resources\Rombels\Schemas\RombelForm;
 use App\Filament\Resources\Rombels\Tables\RombelsTable;
 use BackedEnum;
@@ -41,6 +42,13 @@ class RombelResource extends Resource
     public static function table(Table $table): Table
     {
         return RombelsTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            AnggotaRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

@@ -2,6 +2,7 @@
 
 namespace App\Domains\People\Models;
 
+use App\Domains\Academic\Models\PenempatanRombel;
 use App\Domains\Foundation\Models\User;
 use App\Domains\People\Enums\StatusSiswa;
 use App\Domains\People\Policies\SiswaPolicy;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
@@ -64,6 +66,17 @@ class Siswa extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * The student's rombel per school year. The rombel in the active school
+     * year is read through RombelSiswa.
+     *
+     * @return HasMany<PenempatanRombel, $this>
+     */
+    public function penempatanRombel(): HasMany
+    {
+        return $this->hasMany(PenempatanRombel::class);
     }
 
     public function getActivitylogOptions(): LogOptions

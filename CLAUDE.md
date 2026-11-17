@@ -174,6 +174,12 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
   dan varian AtauGagal), jangan query status_aktif sendiri.
 - Tabel yang kelak merujuk tahun_ajaran atau semester memakai restrictOnDelete,
   supaya tahun ajaran yang sudah dipakai tidak bisa terhapus.
+- Rombel siswa di tahun ajaran aktif dan anggota sebuah rombel tidak pernah
+  di-query sendiri dari penempatan_rombel. Selalu baca lewat
+  App\Domains\Academic\Services\RombelSiswa (rombelTahunAjaranAktif, anggota,
+  jumlahSiswaAktif, dan varian untuk daftar). Menempatkan, memindah, dan
+  menghapus penempatan hanya lewat PenempatanRombelService. Berlaku untuk
+  presensi, jurnal, dan modul lain.
 - Nama rombel (X-1, XI-2) tidak pernah disimpan atau dirakit sendiri. Selalu
   baca lewat $rombel->nama, atau App\Domains\Academic\Models\Rombel::namaDari()
   kalau belum memegang model. Berlaku untuk jadwal, jurnal, presensi, dan modul

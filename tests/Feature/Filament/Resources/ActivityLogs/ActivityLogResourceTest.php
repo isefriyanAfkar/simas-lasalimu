@@ -2,7 +2,10 @@
 
 namespace Tests\Feature\Filament\Resources\ActivityLogs;
 
+use App\Domains\Academic\Models\Rombel;
+use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\MataPelajaranService;
+use App\Domains\Academic\Services\PenempatanRombelService;
 use App\Domains\Academic\Services\RombelService;
 use App\Domains\Academic\Services\TahunAjaranService;
 use App\Domains\Foundation\Enums\Jenjang;
@@ -439,6 +442,25 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnStateSet('objek', 'Dra. Hafida, S.Pd.', $log)
             ->assertTableColumnFormattedStateSet('event', 'Status guru/staf diubah', $log)
             ->assertTableColumnStateSet('rincian', 'status: aktif → pensiun; tanggal_keluar: 2026-01-31; keterangan_keluar: Pensiun usia', $log);
+    }
+
+    public function test_a_rombel_move_names_the_student_and_both_rombel(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $tahunAjaran = TahunAjaran::factory()->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26', 'status_aktif' => true]);
+        $x1 = Rombel::factory()->for($tahunAjaran)->create(['tingkat' => 10, 'nomor' => 1]);
+        $x2 = Rombel::factory()->for($tahunAjaran)->create(['tingkat' => 10, 'nomor' => 2]);
+        $siswa = Siswa::factory()->for(User::factory()->state(['name' => 'Budi']))->create(['nis' => '20261001']);
+        app(PenempatanRombelService::class)->tempatkan($superAdmin, $siswa, $x1);
+        app(PenempatanRombelService::class)->pindahkan($superAdmin, $siswa, $x2);
+        $log = Activity::query()->where('event', 'siswa_dipindah_rombel')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'Budi (20261001)', $log)
+            ->assertTableColumnFormattedStateSet('event', 'Siswa dipindah rombel', $log)
+            ->assertTableColumnStateSet('rincian', 'rombel: X-1 2026/2027 → X-2 2026/2027', $log);
     }
 
     public function test_student_entries_name_the_student_and_the_nis(): void

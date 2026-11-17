@@ -12,6 +12,9 @@ enum AksiAkademik: string
     case SemesterDiaktifkan = 'semester_diaktifkan';
     case MataPelajaranDinonaktifkan = 'mata_pelajaran_dinonaktifkan';
     case MataPelajaranDiaktifkan = 'mata_pelajaran_diaktifkan';
+    case SiswaDitempatkan = 'siswa_ditempatkan';
+    case SiswaDipindahRombel = 'siswa_dipindah_rombel';
+    case PenempatanRombelDihapus = 'penempatan_rombel_dihapus';
 
     public function label(): string
     {
@@ -20,6 +23,9 @@ enum AksiAkademik: string
             self::SemesterDiaktifkan => 'Semester diaktifkan',
             self::MataPelajaranDinonaktifkan => 'Mata pelajaran dinonaktifkan',
             self::MataPelajaranDiaktifkan => 'Mata pelajaran diaktifkan',
+            self::SiswaDitempatkan => 'Siswa ditempatkan di rombel',
+            self::SiswaDipindahRombel => 'Siswa dipindah rombel',
+            self::PenempatanRombelDihapus => 'Penempatan rombel dihapus',
         };
     }
 }

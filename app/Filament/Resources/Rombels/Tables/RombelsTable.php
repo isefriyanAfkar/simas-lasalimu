@@ -6,6 +6,7 @@ use App\Domains\Academic\Enums\Tingkat;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\AktivitasAkademik;
+use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\PeriodeAkademik;
 use App\Domains\Academic\Services\RombelService;
 use Filament\Actions\Action;
@@ -55,7 +56,13 @@ class RombelsTable
                     ->modalDescription(fn (Rombel $record): string => 'Rombel '.AktivitasAkademik::label($record).' akan dihapus.')
                     ->authorize('delete')
                     ->action(function (Rombel $record): void {
-                        app(RombelService::class)->delete($record);
+                        try {
+                            app(RombelService::class)->delete($record);
+                        } catch (PelanggaranAturanAkademik $exception) {
+                            Notification::make()->danger()->title($exception->getMessage())->send();
+
+                            return;
+                        }
 
                         Notification::make()->success()->title("Rombel {$record->nama} dihapus")->send();
                     }),

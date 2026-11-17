@@ -35,4 +35,39 @@ class PelanggaranAturanAkademik extends RuntimeException
     {
         return new self('Belum ada semester aktif. Aktifkan tahun ajaran di menu Tahun Ajaran.');
     }
+
+    public static function rombelDipakaiSiswa(string $namaRombel, int $jumlahSiswa): self
+    {
+        return new self("Rombel {$namaRombel} sudah dipakai oleh {$jumlahSiswa} siswa dan tidak bisa dihapus.");
+    }
+
+    public static function rombelPenuh(string $namaRombel, int $kapasitas): self
+    {
+        return new self("Rombel {$namaRombel} sudah penuh ({$kapasitas} siswa aktif). Naikkan kapasitasnya dulu.");
+    }
+
+    public static function siswaTidakAktif(string $namaSiswa): self
+    {
+        return new self("{$namaSiswa} tidak aktif dan tidak bisa ditempatkan.");
+    }
+
+    public static function siswaSudahDiRombel(string $namaSiswa, string $namaRombel): self
+    {
+        return new self("{$namaSiswa} sudah di {$namaRombel}.");
+    }
+
+    public static function siswaBelumPunyaRombel(string $namaSiswa, string $tahunAjaran): self
+    {
+        return new self("{$namaSiswa} belum punya rombel di tahun ajaran {$tahunAjaran}. Tempatkan dulu, baru bisa dipindah.");
+    }
+
+    public static function tahunAjaranSudahLewat(string $tahunAjaran): self
+    {
+        return new self("Tahun ajaran {$tahunAjaran} sudah lewat. Pilih rombel di tahun ajaran aktif atau sesudahnya.");
+    }
+
+    public static function penempatanAdalahRiwayat(string $namaSiswa): self
+    {
+        return new self("{$namaSiswa} sudah tidak aktif. Penempatannya menjadi riwayat dan tidak bisa dihapus.");
+    }
 }

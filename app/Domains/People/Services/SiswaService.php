@@ -2,6 +2,8 @@
 
 namespace App\Domains\People\Services;
 
+use App\Domains\Academic\Services\PelanggaranAturanAkademik;
+use App\Domains\Academic\Services\PenempatanRombelService;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\KeunikanDatabase;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
@@ -43,7 +45,8 @@ use Spatie\Activitylog\Support\CauserResolver;
  * status. ubahStatus() moves aktif to lulus, mutasi_keluar or keluar with a
  * date (not after today) and a note, and deactivates the account.
  * aktifkanKembali() clears them and reactivates the account only when it is
- * still inactive because of that status change. Both are logged explicitly
+ * still inactive because of that status change; it refuses while a rombel
+ * the student is placed in (active or later school year) is full. Both are logged explicitly
  * (log "kesiswaan"). Students are never deleted.
  *
  * An actor may change a student only when UserService::canManage allows
@@ -72,7 +75,10 @@ class SiswaService
         'nisn' => 'NISN',
     ];
 
-    public function __construct(private UserService $userService) {}
+    public function __construct(
+        private UserService $userService,
+        private PenempatanRombelService $penempatanRombel,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $data  the account and biodata fields (name, email, nik, ...) and the student fields
@@ -175,9 +181,15 @@ class SiswaService
     }
 
     /**
-     * Come back to aktif. The account is reactivated only when it is still
-     * inactive because of the deactivation done by ubahStatus(); see
+     * Come back to aktif. The student counts against the capacity again, so
+     * every rombel the student is placed in for the active or a later school
+     * year must have room (PenempatanRombelService locks it and refuses when
+     * it is full). The account is reactivated only when it is still inactive
+     * because of the deactivation done by ubahStatus(); see
      * UserService::aktifkanKembaliSetelahStatusKeluar().
+     *
+     * @throws PelanggaranAturanKesiswaan
+     * @throws PelanggaranAturanAkademik
      */
     public function aktifkanKembali(User $pelaku, Siswa $siswa): Siswa
     {
@@ -189,6 +201,8 @@ class SiswaService
             if ($terkunci->status === StatusSiswa::Aktif) {
                 throw PelanggaranAturanKesiswaan::sudahAktif();
             }
+
+            $this->penempatanRombel->pastikanMuatUntukAktifKembali($terkunci);
 
             $lama = [
                 'status' => $terkunci->status->value,

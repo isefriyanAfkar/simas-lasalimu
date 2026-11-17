@@ -43,6 +43,25 @@ class SiswaPolicy
         return $authUser->can('Update:Siswa') && $this->userService->canManage($authUser, $siswa->user);
     }
 
+    /**
+     * Place, move, or delete the placement of one student: the same rule as
+     * update. PenempatanRombelService checks the placement rules.
+     */
+    public function tempatkan(User $authUser, Siswa $siswa): bool
+    {
+        return $this->update($authUser, $siswa);
+    }
+
+    /**
+     * Place several students at once. Each student is still checked by
+     * PenempatanRombelService, and a student that may not be managed is
+     * reported as a failure.
+     */
+    public function tempatkanBanyak(User $authUser): bool
+    {
+        return $authUser->can('Update:Siswa');
+    }
+
     public function delete(User $authUser, Siswa $siswa): bool
     {
         return false;

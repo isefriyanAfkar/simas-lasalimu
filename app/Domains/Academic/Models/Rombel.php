@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
@@ -57,6 +58,17 @@ class Rombel extends Model
     public function tahunAjaran(): BelongsTo
     {
         return $this->belongsTo(TahunAjaran::class);
+    }
+
+    /**
+     * Every placement in this rombel, including students who already left.
+     * Members are read through RombelSiswa.
+     *
+     * @return HasMany<PenempatanRombel, $this>
+     */
+    public function penempatan(): HasMany
+    {
+        return $this->hasMany(PenempatanRombel::class);
     }
 
     /**

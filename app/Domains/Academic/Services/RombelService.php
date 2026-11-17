@@ -26,6 +26,8 @@ use Illuminate\Validation\Validator as ValidatorInstance;
  * - kapasitas is a whole number from 1 to 99, or empty
  * - school year, tingkat and nomor together are unique
  * - a rombel may belong to a school year that is not active yet
+ * - a rombel with placements keeps its school year, its capacity may not
+ *   drop below its active students, and it cannot be deleted
  *
  * Uniqueness is checked inside a transaction that first locks the rombel
  * rows; KeunikanDatabase turns a unique index violation that still happens
@@ -34,6 +36,8 @@ use Illuminate\Validation\Validator as ValidatorInstance;
 class RombelService
 {
     public const string PESAN_JENJANG_KOSONG = 'Jenjang sekolah belum diisi. Isi dulu di menu Pengaturan Sekolah.';
+
+    public function __construct(private RombelSiswa $rombelSiswa) {}
 
     /**
      * Two first saves into an empty table can deadlock on the gap lock; the
@@ -76,14 +80,29 @@ class RombelService
     }
 
     /**
-     * Nothing references rombel yet. When a table starts to (students,
-     * schedules, journals), it uses restrictOnDelete and this method must
-     * first count that use inside the transaction, under a lock, and refuse
-     * with a message naming it, like TahunAjaranService::delete().
+     * Refuses a rombel that holds placements, students who left included
+     * (their placement is history). Every table that later references rombel
+     * (schedules, journals) uses restrictOnDelete and is counted here the
+     * same way, inside the transaction and under a lock, with a message
+     * naming it.
+     *
+     * @throws PelanggaranAturanAkademik
      */
     public function delete(Rombel $rombel): void
     {
-        DB::transaction(fn () => $rombel->delete());
+        DB::transaction(function () use ($rombel): void {
+            $terkunci = Rombel::query()->lockForUpdate()->findOrFail($rombel->getKey());
+
+            // Locking read: sees placements committed by a write that held
+            // this rombel's row until now, and blocks new ones until commit.
+            $jumlahSiswa = $terkunci->penempatan()->sharedLock()->count();
+
+            if ($jumlahSiswa > 0) {
+                throw PelanggaranAturanAkademik::rombelDipakaiSiswa($terkunci->nama, $jumlahSiswa);
+            }
+
+            $terkunci->delete();
+        });
     }
 
     /**
@@ -142,6 +161,10 @@ class RombelService
             $this->checkUnique($validator, $tahunAjaranId, $tingkat, $nomor, $ignore);
         });
 
+        if ($ignore !== null) {
+            $validator->after(fn (ValidatorInstance $validator) => $this->checkMembers($validator, $data, $ignore));
+        }
+
         $validated = $validator->validate();
         $kapasitas = $validated['kapasitas'] ?? null;
 
@@ -151,6 +174,38 @@ class RombelService
             'nomor' => (int) $validated['nomor'],
             'kapasitas' => $kapasitas === null || $kapasitas === '' ? null : (int) $kapasitas,
         ];
+    }
+
+    /**
+     * A rombel with placements keeps its school year (the placements copy
+     * it; a foreign key on both columns refuses the change too), and its
+     * capacity may not drop below its active students. Runs with the rombel
+     * rows locked, and every placement locks its rombel row first, so the
+     * counts cannot change meanwhile.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function checkMembers(ValidatorInstance $validator, array $data, Rombel $rombel): void
+    {
+        $tahunAjaranId = $data['tahun_ajaran_id'] ?? null;
+
+        if (! $validator->errors()->has('tahun_ajaran_id') && is_numeric($tahunAjaranId) && (int) $tahunAjaranId !== $rombel->tahun_ajaran_id) {
+            $jumlahSiswa = $rombel->penempatan()->count();
+
+            if ($jumlahSiswa > 0) {
+                $validator->errors()->add('tahun_ajaran_id', "Tahun ajaran rombel ini tidak bisa diubah karena sudah punya {$jumlahSiswa} siswa.");
+            }
+        }
+
+        $kapasitas = $data['kapasitas'] ?? null;
+
+        if (! $validator->errors()->has('kapasitas') && is_numeric($kapasitas)) {
+            $jumlahAktif = $this->rombelSiswa->jumlahSiswaAktif($rombel);
+
+            if ((int) $kapasitas < $jumlahAktif) {
+                $validator->errors()->add('kapasitas', "Kapasitas tidak boleh kurang dari jumlah siswa aktif di rombel ini ({$jumlahAktif}).");
+            }
+        }
     }
 
     /**

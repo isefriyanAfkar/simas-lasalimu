@@ -2,12 +2,17 @@
 
 namespace App\Filament\Resources\Siswas\Tables;
 
+use App\Domains\Academic\Enums\Tingkat;
+use App\Domains\Academic\Services\PelanggaranAturanAkademik;
+use App\Domains\Academic\Services\RombelSiswa;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
+use App\Domains\Foundation\Settings\PengaturanSekolah;
 use App\Domains\People\Enums\StatusSiswa;
 use App\Domains\People\Models\Siswa;
 use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use App\Domains\People\Services\SiswaService;
+use App\Filament\Resources\Siswas\Actions\AksiPenempatanRombel;
 use App\Filament\Support\GalatValidasi;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
@@ -33,7 +38,7 @@ class SiswasTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('user'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => app(RombelSiswa::class)->denganRombelTahunAjaranAktif($query->with('user')))
             ->defaultSort('nis')
             ->columns([
                 TextColumn::make('nis')
@@ -52,6 +57,10 @@ class SiswasTable
                 TextColumn::make('nisn')
                     ->label('NISN')
                     ->placeholder('—'),
+                TextColumn::make('rombel')
+                    ->label('Rombel')
+                    ->state(fn (Siswa $record): ?string => app(RombelSiswa::class)->rombelTermuat($record)?->nama)
+                    ->placeholder('—'),
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
@@ -59,14 +68,31 @@ class SiswasTable
                     ->color(fn (StatusSiswa $state): string => $state === StatusSiswa::Aktif ? 'success' : 'gray'),
             ])
             ->filters([
+                SelectFilter::make('rombel')
+                    ->label('Rombel')
+                    ->options(fn (): array => app(RombelSiswa::class)->opsiRombelTahunAjaranAktif())
+                    ->query(fn (Builder $query, array $data): Builder => is_numeric($data['value'] ?? null)
+                        ? app(RombelSiswa::class)->diRombel($query, (int) $data['value'])
+                        : $query),
+                SelectFilter::make('tingkat')
+                    ->label('Tingkat')
+                    ->options(fn (): array => Tingkat::optionsUntukJenjang(app(PengaturanSekolah::class)->jenjang))
+                    ->query(fn (Builder $query, array $data): Builder => is_numeric($data['value'] ?? null) && Tingkat::tryFrom((int) $data['value']) !== null
+                        ? app(RombelSiswa::class)->diTingkatTahunAjaranAktif($query, Tingkat::from((int) $data['value']))
+                        : $query),
                 SelectFilter::make('status')
                     ->label('Status')
                     ->options(StatusSiswa::options()),
+            ])
+            ->toolbarActions([
+                AksiPenempatanRombel::tempatkanBanyak(),
             ])
             ->recordActions([
                 ViewAction::make()
                     ->hidden(fn (Siswa $record): bool => self::pelaku()->can('update', $record)),
                 EditAction::make(),
+                AksiPenempatanRombel::tempatkan(),
+                AksiPenempatanRombel::hapusPenempatan(),
                 Action::make('ubahStatus')
                     ->label('Ubah status')
                     ->icon(Heroicon::OutlinedArrowRightStartOnRectangle)
@@ -113,7 +139,7 @@ class SiswasTable
                     ->action(function (Siswa $record): void {
                         try {
                             $siswa = app(SiswaService::class)->aktifkanKembali(self::pelaku(), $record);
-                        } catch (PelanggaranAturanKesiswaan|PelanggaranAturanPengguna $exception) {
+                        } catch (PelanggaranAturanKesiswaan|PelanggaranAturanAkademik|PelanggaranAturanPengguna $exception) {
                             Notification::make()->danger()->title($exception->getMessage())->send();
 
                             return;
