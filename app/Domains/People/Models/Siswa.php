@@ -84,6 +84,17 @@ class Siswa extends Model
     }
 
     /**
+     * The student's parents and guardians, with their relation and which one
+     * is the main contact.
+     *
+     * @return HasMany<SiswaWali, $this>
+     */
+    public function siswaWali(): HasMany
+    {
+        return $this->hasMany(SiswaWali::class);
+    }
+
+    /**
      * The student's rombel per school year. The rombel in the active school
      * year is read through RombelSiswa.
      *

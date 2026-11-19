@@ -11,6 +11,7 @@ use App\Domains\Foundation\Services\KunciNikTidakSiap;
 use App\Domains\Foundation\Services\PenjagaNik;
 use App\Domains\People\Models\Ptk;
 use App\Domains\People\Models\Siswa;
+use App\Domains\People\Models\WaliMurid;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -143,6 +144,16 @@ class User extends Authenticatable implements FilamentUser
     public function siswa(): HasOne
     {
         return $this->hasOne(Siswa::class);
+    }
+
+    /**
+     * The parent/guardian record of this account, if any.
+     *
+     * @return HasOne<WaliMurid, $this>
+     */
+    public function waliMurid(): HasOne
+    {
+        return $this->hasOne(WaliMurid::class);
     }
 
     public function isSuperAdmin(): bool

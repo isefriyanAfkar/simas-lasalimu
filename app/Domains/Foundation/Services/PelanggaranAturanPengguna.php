@@ -35,6 +35,11 @@ class PelanggaranAturanPengguna extends RuntimeException
         return new self("Anda tidak boleh mencabut role {$peran}.");
     }
 
+    public static function akunWaliBelumBisaDiaktifkan(): self
+    {
+        return new self('Akun wali belum bisa diaktifkan sampai portal wali tersedia.');
+    }
+
     public static function nikKosong(): self
     {
         return new self('Pengguna ini belum punya NIK.');

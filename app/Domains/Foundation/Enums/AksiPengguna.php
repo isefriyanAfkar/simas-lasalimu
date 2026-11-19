@@ -17,10 +17,12 @@ enum AksiPengguna: string
     case KataSandiDiubahSendiri = 'kata_sandi_diubah_sendiri';
     case NikDitampilkan = 'nik_ditampilkan';
     case NikDicari = 'nik_dicari';
+    case Dihapus = 'dihapus';
 
     public function label(): string
     {
         return match ($this) {
+            self::Dihapus => 'Pengguna dihapus',
             self::Dibuat => 'Pengguna dibuat',
             self::Diubah => 'Pengguna diubah',
             self::Diaktifkan => 'Pengguna diaktifkan',

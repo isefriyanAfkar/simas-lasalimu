@@ -7,6 +7,7 @@ use App\Domains\People\Enums\StatusPtk;
 use App\Domains\People\Models\Ptk;
 use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
+use App\Domains\People\Models\WaliMurid;
 use App\Domains\People\Services\StatusKepegawaianService;
 use App\Filament\Resources\Ptks\Pages\CreatePtk;
 use App\Filament\Resources\Ptks\Pages\EditPtk;
@@ -204,6 +205,7 @@ class PtkResourceTest extends TestCase
         User::factory()->superAdmin()->create(['name' => 'Sari Admin']);
         Ptk::factory()->for(User::factory()->state(['name' => 'Sari Guru']))->create();
         Siswa::factory()->for(User::factory()->state(['name' => 'Sari Siswa']))->create();
+        WaliMurid::factory()->for(User::factory()->state(['name' => 'Sari Wali']))->create();
 
         Livewire::test(CreatePtk::class)
             ->fillForm(['akun' => 'ada'])

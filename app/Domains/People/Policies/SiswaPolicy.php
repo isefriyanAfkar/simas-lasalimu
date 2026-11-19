@@ -62,6 +62,15 @@ class SiswaPolicy
         return $authUser->can('Update:Siswa');
     }
 
+    /**
+     * Add, change, make main contact and let go the student's parents: the
+     * same rule as update. SiswaWaliService checks the relation rules.
+     */
+    public function kelolaWali(User $authUser, Siswa $siswa): bool
+    {
+        return $this->update($authUser, $siswa);
+    }
+
     public function delete(User $authUser, Siswa $siswa): bool
     {
         return false;

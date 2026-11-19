@@ -30,7 +30,7 @@ use Spatie\Activitylog\Support\CauserResolver;
  * - akun "baru" creates an active account without a panel role and with a
  *   random password that is never shown
  * - akun "ada" links an existing account that has no staff record yet, is
- *   not a student account, and that the actor may manage
+ *   not a student or parent account, and that the actor may manage
  *   (UserService::canManage), e.g. an operator who also teaches; its panel
  *   role stays
  * - the account gets the staff role of jenis_ptk (guru or tendik); changing
@@ -60,6 +60,8 @@ use Spatie\Activitylog\Support\CauserResolver;
 class PtkService
 {
     public const string PESAN_AKUN_SISWA = 'Pengguna ini akun siswa dan tidak bisa dihubungkan sebagai guru/staf.';
+
+    public const string PESAN_AKUN_WALI = 'Pengguna ini akun wali murid dan tidak bisa dihubungkan sebagai guru/staf.';
 
     private const int ATTEMPTS = 3;
 
@@ -292,6 +294,10 @@ class PtkService
 
         if ($user->siswa()->exists()) {
             return [null, self::PESAN_AKUN_SISWA];
+        }
+
+        if ($user->waliMurid()->exists()) {
+            return [null, self::PESAN_AKUN_WALI];
         }
 
         if (! $this->userService->canManage($pelaku, $user)) {

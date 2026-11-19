@@ -10,12 +10,12 @@ use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Creates every role (the panel roles super_admin and operator, and the staff
- * roles guru and tendik and the student role siswa, which hold no permission
- * and never open the admin panel) and the permissions. Safe to run
- * repeatedly.
+ * roles guru and tendik, the student role siswa and the parent role wali,
+ * which hold no permission and never open the admin panel) and the
+ * permissions. Safe to run repeatedly.
  * The operator role deliberately receives no User permission for now except
  * ViewNik:User, every TahunAjaran and Rombel permission except Delete, and
- * every MataPelajaran, Ptk and Siswa permission.
+ * every MataPelajaran, Ptk, Siswa and WaliMurid permission.
  */
 class PeranDanIzinSeeder extends Seeder
 {
@@ -106,6 +106,19 @@ class PeranDanIzinSeeder extends Seeder
     ];
 
     /**
+     * Parents (Wali Murid). No Create: a parent is added from a student
+     * (Update:Siswa). Delete covers parents without children only.
+     *
+     * @var list<string>
+     */
+    public const array WALI_MURID_PERMISSIONS = [
+        'ViewAny:WaliMurid',
+        'View:WaliMurid',
+        'Update:WaliMurid',
+        'Delete:WaliMurid',
+    ];
+
+    /**
      * Permissions the operator role holds. Deleting a school year or a rombel
      * is left to the super_admin. ViewNik:User (reveal a NIK in full, logged)
      * is used on the Guru dan Staf screen, where operators manage biodata.
@@ -116,6 +129,7 @@ class PeranDanIzinSeeder extends Seeder
         'ViewNik:User',
         ...self::PTK_PERMISSIONS,
         ...self::SISWA_PERMISSIONS,
+        ...self::WALI_MURID_PERMISSIONS,
         'ViewAny:TahunAjaran',
         'View:TahunAjaran',
         'Create:TahunAjaran',
@@ -135,7 +149,7 @@ class PeranDanIzinSeeder extends Seeder
             Role::findOrCreate($peran->value, 'web');
         }
 
-        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS, ...self::STATUS_KEPEGAWAIAN_PERMISSIONS, ...self::PTK_PERMISSIONS, ...self::SISWA_PERMISSIONS] as $permission) {
+        foreach ([...self::USER_PERMISSIONS, ...self::TAHUN_AJARAN_PERMISSIONS, ...self::MATA_PELAJARAN_PERMISSIONS, ...self::ROMBEL_PERMISSIONS, ...self::STATUS_KEPEGAWAIAN_PERMISSIONS, ...self::PTK_PERMISSIONS, ...self::SISWA_PERMISSIONS, ...self::WALI_MURID_PERMISSIONS] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 

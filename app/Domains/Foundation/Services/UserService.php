@@ -44,6 +44,10 @@ use Spatie\Activitylog\Models\Activity;
  * - a student account holds only the siswa role: update() refuses a panel
  *   role for it. The siswa role itself is never a choice here (peran accepts
  *   panel roles only), so an account without a student record never gets it
+ * - a parent account (wali) follows the same two rules for its username
+ *   (wali00123, set by simpanAkunWali) and its wali role, and activate()
+ *   refuses it until the parent portal exists. Only hapusAkunWali() deletes
+ *   an account, and only a parent account without any other record
  *
  * create() and update() validate their input here (see validateAccountData),
  * whatever the caller already checked. Every save that checks username or
@@ -132,6 +136,10 @@ class UserService
     public const string PESAN_USERNAME_SISWA = 'Username siswa mengikuti NIS. Ubah NIS di layar Siswa.';
 
     public const string PESAN_PERAN_SISWA = 'Akun siswa hanya boleh memiliki role siswa.';
+
+    public const string PESAN_USERNAME_WALI = 'Username wali dibuat otomatis dan tidak bisa diubah.';
+
+    public const string PESAN_PERAN_WALI = 'Akun wali hanya boleh memiliki role wali.';
 
     public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
@@ -253,6 +261,16 @@ class UserService
                 }
             }
 
+            if ($user->waliMurid()->exists()) {
+                if ($data['username'] !== $user->getOriginal('username')) {
+                    throw ValidationException::withMessages(['username' => self::PESAN_USERNAME_WALI]);
+                }
+
+                if ($peran !== null) {
+                    throw ValidationException::withMessages(['peran' => self::PESAN_PERAN_WALI]);
+                }
+            }
+
             // The rows are locked now: read the roles again instead of the
             // relation loaded with the page, which another save may have changed.
             $user->unsetRelation('roles');
@@ -312,6 +330,10 @@ class UserService
         $this->ensureCanManage($pelaku, $user);
 
         return DB::transaction(function () use ($pelaku, $user): User {
+            if ($user->waliMurid()->exists()) {
+                throw PelanggaranAturanPengguna::akunWaliBelumBisaDiaktifkan();
+            }
+
             $this->changeStatus($pelaku, $user, true);
 
             return $user;
@@ -521,6 +543,105 @@ class UserService
             'peran_ptk',
             fn (User $lama) => $this->aturPeranPtk($pelaku, $lama, $peranPtk),
         );
+    }
+
+    /**
+     * Validate the account part of the parent form (WaliMuridService,
+     * SiswaWaliService), without writing: only the name is required; the
+     * biodata rules and NIK protection are the same. The username is set by
+     * simpanAkunWali(), never taken from $data. Must run inside a transaction
+     * (it locks the user rows).
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws ValidationException
+     */
+    public function validasiAkunWali(array $data, ?User $user): void
+    {
+        $this->validateAccountData($this->denganUsernameWali($data, $user), $user, akunTanpaPanel: true, akunWali: true);
+    }
+
+    /**
+     * Create ($user null) or change the account of a parent or guardian. A new
+     * account is INACTIVE until the parent portal exists, holds only the wali
+     * role, gets a random password that is never shown, and gets the username
+     * "wali" plus its five-digit account id (wali00123): it never depends on
+     * the phone number, which may change. Roles and username of an existing
+     * account are not touched.
+     *
+     * @param  array<string, mixed>  $data  name, email, nik, hapus_nik and biodata
+     *
+     * @throws ValidationException
+     */
+    public function simpanAkunWali(User $pelaku, ?User $user, array $data): User
+    {
+        return $this->simpanAkunTanpaPanel(
+            $pelaku,
+            $user,
+            $this->denganUsernameWali($data, $user),
+            Peran::Wali,
+            'peran_wali',
+            fn (User $lama) => null,
+            akunWali: true,
+        );
+    }
+
+    /**
+     * Fill in the gender of a parent account that has none, from the relation
+     * to a student (an ayah is male, an ibu female). Logged like any account
+     * change. Must run inside the caller's transaction.
+     */
+    public function isiJenisKelaminWali(User $pelaku, User $user, JenisKelamin $jenisKelamin): void
+    {
+        $this->ensureCanManage($pelaku, $user);
+
+        DB::transaction(function () use ($pelaku, $user, $jenisKelamin): void {
+            $this->lockUser($user);
+
+            if ($user->jenis_kelamin !== null) {
+                return;
+            }
+
+            $before = $this->snapshot($user);
+            $user->update(['jenis_kelamin' => $jenisKelamin]);
+            $changes = $this->diff($before, $this->snapshot($user));
+
+            if ($changes !== null) {
+                $this->log(AksiPengguna::Diubah, $pelaku, $user, $changes);
+            }
+        });
+    }
+
+    /**
+     * Delete the account of a parent whose record WaliMuridService deletes in
+     * the same transaction. Only an account that holds nothing but the wali
+     * role and has no staff or student record is deleted; its photo is
+     * removed after the commit. The log entry keeps the name as label, since
+     * the subject is gone.
+     */
+    public function hapusAkunWali(User $pelaku, User $user): void
+    {
+        $this->ensureCanManage($pelaku, $user);
+
+        DB::transaction(function () use ($pelaku, $user): void {
+            $this->lockUser($user);
+
+            if ($user->getRoleNames()->all() !== [Peran::Wali->value] || $user->ptk()->exists() || $user->siswa()->exists() || $user->waliMurid()->exists()) {
+                throw new LogicException("User {$user->getKey()} is not a parent account that may be deleted.");
+            }
+
+            activity(self::LOG_NAME)
+                ->causedBy($pelaku)
+                ->performedOn($user)
+                ->event(AksiPengguna::Dihapus->value)
+                ->withProperty('label', $user->name)
+                ->withChanges(['attributes' => [], 'old' => ['name' => $user->name, 'username' => $user->username]])
+                ->log(AksiPengguna::Dihapus->label());
+
+            $this->deleteReplacedPhotoAfterCommit($user->foto, null);
+            $user->syncRoles([]);
+            $user->delete();
+        });
     }
 
     /**
@@ -751,7 +872,7 @@ class UserService
      *
      * @throws ValidationException
      */
-    private function validateAccountData(array $data, ?User $ignore, bool $akunTanpaPanel = false): array
+    private function validateAccountData(array $data, ?User $ignore, bool $akunTanpaPanel = false, bool $akunWali = false): array
     {
         $this->lockUsers();
 
@@ -777,11 +898,11 @@ class UserService
             'name' => ['required', 'string', 'max:255'],
             'username' => self::usernameRules($ignore),
             'email' => self::emailRules($ignore),
-            ...Arr::only($this->biodataRules($ignore), array_keys($biodata)),
+            ...Arr::only($this->biodataRules($ignore, $akunWali), array_keys($biodata)),
         ];
 
         if ($akunTanpaPanel) {
-            $rules['jenis_kelamin'] = ['required', Rule::enum(JenisKelamin::class)];
+            $rules['jenis_kelamin'] = [$akunWali ? 'nullable' : 'required', Rule::enum(JenisKelamin::class)];
         } else {
             $rules['peran'] = ['present', 'nullable', 'string', Rule::in(Peran::nilaiPanel())];
         }
@@ -829,25 +950,25 @@ class UserService
      *
      * @return array<string, list<mixed>>
      */
-    private function biodataRules(?User $ignore): array
+    private function biodataRules(?User $ignore, bool $akunWali = false): array
     {
         $currentFoto = $ignore?->foto;
 
         return [
-            'nik' => ['bail', 'nullable', 'string', 'regex:/^\d{16}$/', function (string $attribute, mixed $value, Closure $fail) use ($ignore): void {
+            'nik' => ['bail', 'nullable', 'string', 'regex:/^\d{16}$/', function (string $attribute, mixed $value, Closure $fail) use ($ignore, $akunWali): void {
                 try {
-                    $taken = User::query()
+                    $pemilik = User::query()
                         ->denganNik((string) $value)
                         ->when($ignore, fn ($query) => $query->whereKeyNot($ignore?->getKey()))
-                        ->exists();
+                        ->first();
                 } catch (KunciNikTidakSiap) {
                     $fail(self::PESAN_KUNCI_NIK);
 
                     return;
                 }
 
-                if ($taken) {
-                    $fail('NIK ini sudah terdaftar pada pengguna lain.');
+                if ($pemilik !== null) {
+                    $fail($akunWali ? self::pesanNikDipakaiUntukWali($pemilik) : 'NIK ini sudah terdaftar pada pengguna lain.');
                 }
             }],
             'hapus_nik' => ['boolean'],
@@ -1057,14 +1178,14 @@ class UserService
      *
      * @throws ValidationException
      */
-    private function simpanAkunTanpaPanel(User $pelaku, ?User $user, array $data, Peran $peran, string $kunciLogPeran, Closure $aturPeran): User
+    private function simpanAkunTanpaPanel(User $pelaku, ?User $user, array $data, Peran $peran, string $kunciLogPeran, Closure $aturPeran, bool $akunWali = false): User
     {
         if ($user !== null) {
             $this->ensureCanManage($pelaku, $user);
         }
 
-        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data, $peran, $kunciLogPeran, $aturPeran): User {
-            $data = $this->validateAccountData($data, $user, akunTanpaPanel: true);
+        return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data, $peran, $kunciLogPeran, $aturPeran, $akunWali): User {
+            $data = $this->validateAccountData($data, $user, akunTanpaPanel: true, akunWali: $akunWali);
             $this->ensureCanGrantRole($pelaku, $peran);
 
             if ($user === null) {
@@ -1073,11 +1194,16 @@ class UserService
                     'username' => $data['username'],
                     'email' => $data['email'] ?? null,
                     'password' => Str::password(32),
-                    'status_aktif' => true,
+                    'status_aktif' => ! $akunWali,
                     ...Arr::only($data, self::BIODATA_FIELDS),
                 ]);
                 $this->applyNik($user, $data);
                 $user->save();
+
+                if ($akunWali) {
+                    $user->forceFill(['username' => $this->usernameWaliUntuk($user)])->save();
+                }
+
                 $user->assignRole($peran->value);
 
                 $this->log(AksiPengguna::Dibuat, $pelaku, $user, [
@@ -1111,6 +1237,58 @@ class UserService
 
             return $user;
         }, self::ATTEMPTS));
+    }
+
+    /**
+     * The username of a parent account is never typed: an existing account
+     * keeps its own, and a new one gets a unique placeholder that
+     * simpanAkunTanpaPanel() replaces with usernameWaliUntuk() right after
+     * the insert.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function denganUsernameWali(array $data, ?User $user): array
+    {
+        return [...$data, 'username' => $user->username ?? 'wali-baru-'.Str::lower(Str::random(20))];
+    }
+
+    /**
+     * "wali" plus the five-digit account id (wali00123). In the rare case
+     * that someone already uses it, a suffix is added (wali00123-2).
+     */
+    private function usernameWaliUntuk(User $user): string
+    {
+        $dasar = 'wali'.str_pad((string) $user->getKey(), 5, '0', STR_PAD_LEFT);
+        $username = $dasar;
+        $urutan = 2;
+
+        while (User::query()->where('username', $username)->whereKeyNot($user->getKey())->exists()) {
+            $username = "{$dasar}-{$urutan}";
+            $urutan++;
+        }
+
+        return $username;
+    }
+
+    /**
+     * The NIK message on the parent form names who holds the NIK (never the
+     * NIK itself): another parent is the same person, so that record should
+     * be chosen; a staff member keeps it, so the parent record goes without.
+     */
+    private static function pesanNikDipakaiUntukWali(User $pemilik): string
+    {
+        if ($pemilik->waliMurid()->exists()) {
+            return "NIK ini milik wali {$pemilik->name}. Pilih wali yang sudah ada.";
+        }
+
+        $ptk = $pemilik->ptk()->first();
+
+        if ($ptk !== null) {
+            return "NIK ini milik guru/staf {$ptk->nama_lengkap}. Kosongkan NIK untuk data wali ini.";
+        }
+
+        return 'NIK ini sudah terdaftar pada pengguna lain.';
     }
 
     /**

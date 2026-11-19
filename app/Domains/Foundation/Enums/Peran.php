@@ -10,7 +10,10 @@ namespace App\Domains\Foundation\Enums;
  *   admin panel, and are never touched by Kelola Pengguna;
  * - the student role (siswa) follows the student record, never opens the
  *   admin panel, and is never touched by Kelola Pengguna. Students will sign
- *   in later through a panel of their own, with the NIS as username.
+ *   in later through a panel of their own, with the NIS as username;
+ * - the parent role (wali) follows the parent record, never opens the admin
+ *   panel, and is never touched by Kelola Pengguna. Parent accounts stay
+ *   inactive until the parent portal exists.
  */
 enum Peran: string
 {
@@ -19,6 +22,7 @@ enum Peran: string
     case Guru = 'guru';
     case Tendik = 'tendik';
     case Siswa = 'siswa';
+    case Wali = 'wali';
 
     public function label(): string
     {
@@ -28,6 +32,7 @@ enum Peran: string
             self::Guru => 'Guru',
             self::Tendik => 'Tendik',
             self::Siswa => 'Siswa',
+            self::Wali => 'Wali',
         };
     }
 
@@ -38,7 +43,7 @@ enum Peran: string
     {
         return match ($this) {
             self::SuperAdmin, self::Operator => true,
-            self::Guru, self::Tendik, self::Siswa => false,
+            self::Guru, self::Tendik, self::Siswa, self::Wali => false,
         };
     }
 
