@@ -28,6 +28,17 @@ CLAUDE.md.
   Contoh: `app/Domains/Academic/Services/PelanggaranAturanAkademik.php`.
 - Baris yang dibaca untuk validasi dikunci dengan `lockForUpdate`. Kalau
   penyimpanan pertama bisa bertabrakan, tambahkan `attempts` pada transaksi.
+- Setiap hitungan yang dipakai untuk menegakkan batas (kapasitas, stok,
+  kuota) dibaca dengan kunci, bukan bacaan biasa.
+  - Pakai `sharedLock()->count()` atau `lockForUpdate()`.
+  - Kalau syaratnya ada di tabel lain, pakai `join`, bukan `whereHas`:
+    kunci tidak menjangkau baris yang dibaca di subquery.
+  - Alasannya: di REPEATABLE READ, bacaan biasa memakai snapshot transaksi,
+    sehingga baris yang di-commit transaksi lain selama menunggu kunci tidak
+    terlihat.
+  - Contoh: `RombelSiswa::jumlahSiswaAktifTerkunci()` dan
+    `RombelService::delete()`. Test-nya memeriksa SQL hitungan itu; lihat
+    `tests/Feature/Domains/Academic/Services/HitunganKapasitasTerkunciTest.php`.
 - Field unik (kode, nama, username, email) dijaga dua lapis:
   - validasi `unique` dijalankan di dalam `DB::transaction(..., attempts)`
     setelah baris tabelnya dikunci dengan `lockForUpdate`, jadi dua

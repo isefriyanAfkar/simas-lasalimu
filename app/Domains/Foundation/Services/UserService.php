@@ -41,6 +41,9 @@ use Spatie\Activitylog\Models\Activity;
  *   removed here
  * - the username of a student account is its NIS and only changes with the
  *   NIS (SiswaService); update() rejects any other change
+ * - a student account holds only the siswa role: update() refuses a panel
+ *   role for it. The siswa role itself is never a choice here (peran accepts
+ *   panel roles only), so an account without a student record never gets it
  *
  * create() and update() validate their input here (see validateAccountData),
  * whatever the caller already checked. Every save that checks username or
@@ -127,6 +130,8 @@ class UserService
     public const string PESAN_KUNCI_NIK = 'NIK belum bisa disimpan: kunci NIK belum diatur di server.';
 
     public const string PESAN_USERNAME_SISWA = 'Username siswa mengikuti NIS. Ubah NIS di layar Siswa.';
+
+    public const string PESAN_PERAN_SISWA = 'Akun siswa hanya boleh memiliki role siswa.';
 
     public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
@@ -238,8 +243,14 @@ class UserService
             $data = $this->validateAccountData($data, $user);
             $peran = $data['peran'] === null ? null : Peran::from($data['peran']);
 
-            if ($data['username'] !== $user->getOriginal('username') && $user->siswa()->exists()) {
-                throw ValidationException::withMessages(['username' => self::PESAN_USERNAME_SISWA]);
+            if ($user->siswa()->exists()) {
+                if ($data['username'] !== $user->getOriginal('username')) {
+                    throw ValidationException::withMessages(['username' => self::PESAN_USERNAME_SISWA]);
+                }
+
+                if ($peran !== null) {
+                    throw ValidationException::withMessages(['peran' => self::PESAN_PERAN_SISWA]);
+                }
             }
 
             // The rows are locked now: read the roles again instead of the

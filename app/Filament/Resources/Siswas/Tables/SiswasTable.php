@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Siswas\Tables;
 
 use App\Domains\Academic\Enums\Tingkat;
 use App\Domains\Academic\Services\PelanggaranAturanAkademik;
+use App\Domains\Academic\Services\PenempatanRombelService;
 use App\Domains\Academic\Services\RombelSiswa;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
@@ -38,12 +39,14 @@ class SiswasTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => app(RombelSiswa::class)->denganRombelTahunAjaranAktif($query->with('user')))
-            ->defaultSort('nis')
+            ->modifyQueryUsing(fn (Builder $query): Builder => app(PenempatanRombelService::class)->denganPenempatanBisaDihapus(
+                app(RombelSiswa::class)->denganRombelTahunAjaranAktif($query->with('user.roles')),
+            ))
+            ->defaultSort(self::urutanNis(...))
             ->columns([
                 TextColumn::make('nis')
                     ->label('NIS')
-                    ->sortable(),
+                    ->sortable(query: self::urutanNis(...)),
                 TextColumn::make('user.name')
                     ->label('Nama')
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(fn (Builder $query): Builder => $query
@@ -156,5 +159,14 @@ class SiswasTable
         $pelaku = Filament::auth()->user();
 
         return $pelaku;
+    }
+
+    /**
+     * @param  Builder<Siswa>  $query
+     * @return Builder<Siswa>
+     */
+    private static function urutanNis(Builder $query, string $direction = 'asc'): Builder
+    {
+        return $query->urutanNis($direction);
     }
 }

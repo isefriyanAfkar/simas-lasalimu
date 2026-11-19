@@ -154,6 +154,45 @@ class SiswaServiceTest extends TestCase
         $this->assertSame('Budi S', $user->fresh()->name);
     }
 
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function panelRoles(): array
+    {
+        return [
+            'operator' => ['operator'],
+            'super_admin' => ['super_admin'],
+        ];
+    }
+
+    #[DataProvider('panelRoles')]
+    public function test_kelola_pengguna_cannot_give_a_student_account_another_role(string $peran): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = $this->service()->create($superAdmin, $this->data())->user->fresh();
+
+        try {
+            app(UserService::class)->update($superAdmin, $user, ['name' => $user->name, 'username' => $user->username, 'email' => null, 'peran' => $peran]);
+            $this->fail('A student account got another role.');
+        } catch (ValidationException $exception) {
+            $this->assertSame([UserService::PESAN_PERAN_SISWA], $exception->errors()['peran']);
+        }
+
+        $this->assertSame(['siswa'], $user->fresh()->getRoleNames()->all());
+    }
+
+    public function test_kelola_pengguna_cannot_give_the_student_role_to_an_account_without_a_student_record(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $user = User::factory()->create(['username' => 'budi']);
+
+        $this->assertValidationError('peran', fn () => app(UserService::class)->update($superAdmin, $user, ['name' => $user->name, 'username' => 'budi', 'email' => null, 'peran' => 'siswa']));
+        $this->assertValidationError('peran', fn () => app(UserService::class)->create($superAdmin, ['name' => 'Ani', 'username' => 'ani', 'email' => null, 'password' => 'Rahasia#2026!', 'peran' => 'siswa']));
+
+        $this->assertSame([], $user->fresh()->getRoleNames()->all());
+        $this->assertDatabaseMissing('users', ['username' => 'ani']);
+    }
+
     public function test_kelola_pengguna_still_changes_the_username_of_other_accounts(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();

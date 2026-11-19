@@ -141,22 +141,57 @@ class RombelSiswa
      */
     public function anggota(Rombel $rombel): Collection
     {
-        return Siswa::query()
-            ->with('user')
-            ->whereHas('penempatanRombel', fn ($penempatan) => $penempatan->where('rombel_id', $rombel->getKey()))
-            ->orderBy(User::query()->select('name')->whereColumn('users.id', 'siswa.user_id'))
-            ->get();
+        return new Collection($this->queryAnggota($rombel)->get()->map(fn (PenempatanRombel $penempatan): Siswa => $penempatan->siswa)->all());
+    }
+
+    /**
+     * The placements of the rombel's members (students who left included),
+     * with each student and account loaded and ordered by name. For tables
+     * that list the members, such as the Anggota list on the Rombel page.
+     *
+     * @return Builder<PenempatanRombel>
+     */
+    public function queryAnggota(Rombel $rombel): Builder
+    {
+        return PenempatanRombel::query()
+            ->with('siswa.user')
+            ->where('rombel_id', $rombel->getKey())
+            ->orderBy(User::query()
+                ->select('users.name')
+                ->join('siswa', 'siswa.user_id', '=', 'users.id')
+                ->whereColumn('siswa.id', 'penempatan_rombel.siswa_id'));
     }
 
     /**
      * The active students placed in the rombel: the number that counts
-     * against its capacity.
+     * against its capacity. A plain read, for display; a rule that enforces
+     * the capacity uses jumlahSiswaAktifTerkunci().
      */
     public function jumlahSiswaAktif(Rombel $rombel): int
     {
+        return $this->siswaAktifDi($rombel)->count();
+    }
+
+    /**
+     * The same count as a locking read, for enforcing the capacity. Must run
+     * inside a transaction. A plain read would use the transaction's snapshot
+     * and could miss a placement another transaction committed meanwhile; a
+     * locking read sees the latest committed rows, and the join (not a
+     * subquery, which a lock does not reach) locks each student's status too.
+     */
+    public function jumlahSiswaAktifTerkunci(Rombel $rombel): int
+    {
+        return $this->siswaAktifDi($rombel)->sharedLock()->count();
+    }
+
+    /**
+     * @return Builder<PenempatanRombel>
+     */
+    private function siswaAktifDi(Rombel $rombel): Builder
+    {
         return PenempatanRombel::query()
-            ->where('rombel_id', $rombel->getKey())
-            ->whereHas('siswa', fn ($siswa) => $siswa->where('status', StatusSiswa::Aktif->value))
-            ->count();
+            ->join('siswa', 'siswa.id', '=', 'penempatan_rombel.siswa_id')
+            ->where('penempatan_rombel.rombel_id', $rombel->getKey())
+            ->where('siswa.status', StatusSiswa::Aktif->value);
     }
 }

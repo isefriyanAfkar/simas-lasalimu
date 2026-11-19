@@ -11,8 +11,11 @@ use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\StatusSiswa;
 use App\Domains\People\Models\Siswa;
+use Illuminate\Database\DetectsConcurrencyErrors;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * The only place that writes rombel placements (penempatan_rombel).
@@ -35,10 +38,21 @@ use Illuminate\Support\Facades\DB;
  *
  * Every write locks the student row first and then the rombel row, the same
  * order as SiswaService::aktifkanKembali(), so two writes for the same
- * student or into the same rombel run one after the other.
+ * student or into the same rombel run one after the other. The capacity is
+ * enforced with a locking count (RombelSiswa::jumlahSiswaAktifTerkunci()):
+ * correctness never depends on what the transaction read before. As a
+ * second layer, nothing is read without a lock before the rombel lock is
+ * taken. A deadlock (rare: a student coming back into the rombel at the same
+ * moment) is retried.
  */
 class PenempatanRombelService
 {
+    use DetectsConcurrencyErrors;
+
+    public const string PESAN_COBA_LAGI = 'Sedang ada perubahan lain pada rombel ini. Coba lagi untuk siswa ini.';
+
+    private const int ATTEMPTS = 3;
+
     public function __construct(
         private PeriodeAkademik $periodeAkademik,
         private RombelSiswa $rombelSiswa,
@@ -55,6 +69,7 @@ class PenempatanRombelService
         return DB::transaction(function () use ($pelaku, $siswa, $rombel): PenempatanRombel {
             $siswa = $this->lockStudent($siswa);
             $rombel = $this->lockRombel($rombel);
+            $siswa->load('user');
 
             $this->ensureActive($siswa);
             $this->ensureNotPast($rombel->tahunAjaran);
@@ -76,7 +91,7 @@ class PenempatanRombelService
             $this->log(AksiAkademik::SiswaDitempatkan, $pelaku, $siswa, ['attributes' => ['rombel' => AktivitasAkademik::label($rombel)]]);
 
             return $penempatan;
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
@@ -91,6 +106,7 @@ class PenempatanRombelService
         return DB::transaction(function () use ($pelaku, $siswa, $rombel): PenempatanRombel {
             $siswa = $this->lockStudent($siswa);
             $rombel = $this->lockRombel($rombel);
+            $siswa->load('user');
 
             $this->ensureActive($siswa);
             $this->ensureNotPast($rombel->tahunAjaran);
@@ -116,13 +132,15 @@ class PenempatanRombelService
             ]);
 
             return $penempatan;
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
      * Place each student on its own, so one failure does not undo the
      * others. A student who already has a rombel in that school year is
-     * skipped, never moved.
+     * skipped, never moved. A deadlock or lock timeout that outlasts the
+     * retries is reported for that student ("coba lagi") instead of
+     * stopping the rest.
      *
      * @param  iterable<Siswa>  $siswa
      * @return array{berhasil: list<int>, gagal: array<int, string>} student ids placed, and the reason per student id that was not
@@ -138,6 +156,12 @@ class PenempatanRombelService
                 $berhasil[] = (int) $satu->getKey();
             } catch (PelanggaranAturanAkademik|PelanggaranAturanPengguna $exception) {
                 $gagal[(int) $satu->getKey()] = $exception->getMessage();
+            } catch (Throwable $exception) {
+                if (! $this->causedByConcurrencyError($exception)) {
+                    throw $exception;
+                }
+
+                $gagal[(int) $satu->getKey()] = self::PESAN_COBA_LAGI;
             }
         }
 
@@ -171,7 +195,7 @@ class PenempatanRombelService
                 'attributes' => ['rombel' => null],
                 'old' => ['rombel' => $label],
             ]);
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
@@ -195,6 +219,7 @@ class PenempatanRombelService
         $rombelIds = PenempatanRombel::query()
             ->where('siswa_id', $siswa->getKey())
             ->whereHas('tahunAjaran', fn ($query) => $query->whereDate('tanggal_mulai', '>=', $aktif->tanggal_mulai->toDateString()))
+            ->sharedLock()
             ->pluck('rombel_id');
 
         foreach ($rombelIds as $rombelId) {
@@ -233,6 +258,37 @@ class PenempatanRombelService
         }
 
         return $opsi;
+    }
+
+    /**
+     * For lists: mark in the same query whether each student has a placement
+     * hapus() may delete, read with adaPenempatanBisaDihapus().
+     *
+     * @param  Builder<Siswa>  $query
+     * @return Builder<Siswa>
+     */
+    public function denganPenempatanBisaDihapus(Builder $query): Builder
+    {
+        $mulaiAktif = $this->periodeAkademik->tahunAjaranAktif()?->tanggal_mulai->toDateString();
+
+        return $query->withExists(['penempatanRombel as punya_penempatan_bisa_dihapus' => fn ($penempatan) => $mulaiAktif === null
+            ? $penempatan->whereRaw('1 = 0')
+            : $penempatan->whereHas('tahunAjaran', fn ($tahunAjaran) => $tahunAjaran->whereDate('tanggal_mulai', '>=', $mulaiAktif))]);
+    }
+
+    /**
+     * Whether the student is active and has a placement hapus() may delete.
+     * Uses the mark of denganPenempatanBisaDihapus() when loaded.
+     */
+    public function adaPenempatanBisaDihapus(Siswa $siswa): bool
+    {
+        if ($siswa->status !== StatusSiswa::Aktif) {
+            return false;
+        }
+
+        $tanda = $siswa->getAttribute('punya_penempatan_bisa_dihapus');
+
+        return $tanda === null ? $this->penempatanYangBisaDihapus($siswa)->isNotEmpty() : (bool) $tanda;
     }
 
     /**
@@ -286,18 +342,18 @@ class PenempatanRombelService
     }
 
     /**
-     * Must run with the rombel row locked.
+     * Must run with the rombel row locked. The count is a locking read.
      */
     private function ensureRoom(Rombel $rombel): void
     {
-        if ($rombel->kapasitas !== null && $this->rombelSiswa->jumlahSiswaAktif($rombel) >= $rombel->kapasitas) {
+        if ($rombel->kapasitas !== null && $this->rombelSiswa->jumlahSiswaAktifTerkunci($rombel) >= $rombel->kapasitas) {
             throw PelanggaranAturanAkademik::rombelPenuh($rombel->nama, $rombel->kapasitas);
         }
     }
 
     private function lockStudent(Siswa $siswa): Siswa
     {
-        return Siswa::query()->with('user')->lockForUpdate()->findOrFail($siswa->getKey());
+        return Siswa::query()->lockForUpdate()->findOrFail($siswa->getKey());
     }
 
     private function lockRombel(Rombel $rombel): Rombel

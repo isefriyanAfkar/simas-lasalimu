@@ -48,12 +48,7 @@ class AnggotaRelationManager extends RelationManager
     {
         return $table
             ->heading(fn (): string => self::judul($this->getOwnerRecord()))
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('siswa.user'))
-            ->defaultSort(fn (Builder $query): Builder => $query->orderBy(
-                User::query()->select('users.name')
-                    ->join('siswa', 'siswa.user_id', '=', 'users.id')
-                    ->whereColumn('siswa.id', 'penempatan_rombel.siswa_id'),
-            ))
+            ->query(fn (): Builder => app(RombelSiswa::class)->queryAnggota($this->rombel()))
             ->paginated(false)
             ->columns([
                 TextColumn::make('siswa.nis')
@@ -68,6 +63,18 @@ class AnggotaRelationManager extends RelationManager
             ])
             ->recordActions([])
             ->toolbarActions([]);
+    }
+
+    /**
+     * The rows come from RombelSiswa::queryAnggota(), the standard reader of
+     * a rombel's members, not from the relationship.
+     */
+    private function rombel(): Rombel
+    {
+        /** @var Rombel $rombel */
+        $rombel = $this->getOwnerRecord();
+
+        return $rombel;
     }
 
     /**

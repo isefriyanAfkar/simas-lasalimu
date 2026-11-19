@@ -6,6 +6,7 @@ use App\Domains\Academic\Enums\Tingkat;
 use App\Domains\Academic\Models\PenempatanRombel;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
+use App\Domains\Academic\Services\RombelSiswa;
 use App\Domains\Foundation\Enums\Jenjang;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
@@ -20,8 +21,11 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Select;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
+use Mockery\MockInterface;
 use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
 
@@ -205,6 +209,19 @@ class PenempatanRombelResourceTest extends TestCase
             ->assertActionDoesNotExist(TestAction::make('delete')->table($ani));
     }
 
+    public function test_the_member_list_reads_through_rombel_siswa(): void
+    {
+        $x1 = $this->rombel(Tingkat::X, 1);
+        $ani = PenempatanRombel::factory()->for($this->siswa('Ani'))->for($x1)->create();
+        $this->partialMock(RombelSiswa::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('queryAnggota')
+            ->atLeast()->once()
+            ->passthru());
+
+        Livewire::test(AnggotaRelationManager::class, ['ownerRecord' => $x1, 'pageClass' => EditRombel::class])
+            ->assertCanSeeTableRecords([$ani]);
+    }
+
     public function test_a_rombel_without_capacity_says_so(): void
     {
         $x1 = $this->rombel(Tingkat::X, 1);
@@ -237,6 +254,72 @@ class PenempatanRombelResourceTest extends TestCase
             ->assertNotified('Rombel X-1 sudah dipakai oleh 1 siswa dan tidak bisa dihapus.');
 
         $this->assertNotNull($x1->fresh());
+    }
+
+    public function test_the_list_loads_the_roles_of_all_rows_at_once(): void
+    {
+        foreach (['Ani', 'Budi'] as $nama) {
+            $this->siswa($nama);
+        }
+        $this->roleQueriesWhileListing();
+        $sedikit = $this->roleQueriesWhileListing();
+
+        foreach (['Citra', 'Dodi', 'Eka', 'Fajar'] as $nama) {
+            $this->siswa($nama);
+        }
+
+        $this->assertSame(1, $sedikit, 'The roles of the rows are loaded in one query.');
+        $this->assertSame($sedikit, $this->roleQueriesWhileListing());
+    }
+
+    public function test_delete_placement_is_offered_only_when_there_is_one_to_delete(): void
+    {
+        $tanpa = $this->siswa('Ani');
+        $tahunIni = $this->siswa('Budi');
+        $tahunDepan = $this->siswa('Citra');
+        $tahunLalu = $this->siswa('Dodi');
+        PenempatanRombel::factory()->for($tahunIni)->for($this->rombel(Tingkat::X, 1))->create();
+        PenempatanRombel::factory()->for($tahunDepan)->for($this->rombel(Tingkat::XI, 1, $this->tahunAjaran('2027/2028')))->create();
+        PenempatanRombel::factory()->for($tahunLalu)->for($this->rombel(Tingkat::X, 9, $this->tahunAjaran('2025/2026')))->create();
+
+        Livewire::test(ListSiswas::class)
+            ->assertActionHidden(TestAction::make('hapusPenempatan')->table($tanpa))
+            ->assertActionVisible(TestAction::make('hapusPenempatan')->table($tahunIni))
+            ->assertActionVisible(TestAction::make('hapusPenempatan')->table($tahunDepan))
+            ->assertActionHidden(TestAction::make('hapusPenempatan')->table($tahunLalu));
+    }
+
+    public function test_nis_is_ordered_as_a_number_in_the_list_and_in_the_bulk_action(): void
+    {
+        $panjang = $this->siswa('Ani', nis: '10000');
+        $pendek = $this->siswa('Budi', nis: '9999');
+        $x1 = $this->rombel(Tingkat::X, 1, kapasitas: 1);
+
+        $daftar = Livewire::test(ListSiswas::class);
+        $this->assertSame([$pendek->id, $panjang->id], $daftar->instance()->getTableRecords()->modelKeys());
+
+        $daftar
+            ->selectTableRecords([$panjang->id, $pendek->id])
+            ->callAction(TestAction::make('tempatkanBanyak')->table()->bulk(), data: ['rombel_id' => $x1->id])
+            ->assertNotified('1 dari 2 siswa ditempatkan di X-1');
+
+        $this->assertSame([$pendek->id], PenempatanRombel::query()->pluck('siswa_id')->all());
+    }
+
+    private function roleQueriesWhileListing(): int
+    {
+        $jumlah = 0;
+        $merekam = true;
+        DB::listen(function (QueryExecuted $query) use (&$jumlah, &$merekam): void {
+            if ($merekam && str_contains($query->sql, 'model_has_roles')) {
+                $jumlah++;
+            }
+        });
+
+        Livewire::test(ListSiswas::class)->assertOk();
+        $merekam = false;
+
+        return $jumlah;
     }
 
     private function tahunAjaran(string $nama, bool $aktif = false): TahunAjaran

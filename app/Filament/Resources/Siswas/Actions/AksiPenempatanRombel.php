@@ -123,7 +123,7 @@ final class AksiPenempatanRombel
                         ->all())
                     ->required(),
             ])
-            ->visible(fn (Siswa $record): bool => $record->status === StatusSiswa::Aktif)
+            ->visible(fn (Siswa $record): bool => app(PenempatanRombelService::class)->adaPenempatanBisaDihapus($record))
             ->authorize('tempatkan')
             ->action(function (Siswa $record, array $data): void {
                 $penempatan = PenempatanRombel::query()
@@ -179,9 +179,8 @@ final class AksiPenempatanRombel
                     return;
                 }
 
-                /** @var Collection<int, Siswa> $records */
-                $records = $records->load('user')->sortBy('nis')->values();
-                $hasil = app(PenempatanRombelService::class)->tempatkanBanyak(self::pelaku(), $records, $rombel);
+                $terpilih = Siswa::query()->with('user')->whereKey($records->modelKeys())->urutanNis()->get();
+                $hasil = app(PenempatanRombelService::class)->tempatkanBanyak(self::pelaku(), $terpilih, $rombel);
                 $jumlahBerhasil = count($hasil['berhasil']);
 
                 if ($hasil['gagal'] === []) {
@@ -193,13 +192,13 @@ final class AksiPenempatanRombel
                 $alasan = [];
 
                 foreach ($hasil['gagal'] as $siswaId => $pesan) {
-                    $nama = $records->find($siswaId)?->user->name ?? '';
+                    $nama = $terpilih->find($siswaId)->user->name ?? '';
                     $alasan[] = str_starts_with($pesan, $nama) ? $pesan : "{$nama}: {$pesan}";
                 }
 
                 Notification::make()
                     ->warning()
-                    ->title("{$jumlahBerhasil} dari {$records->count()} siswa ditempatkan di {$rombel->nama}")
+                    ->title("{$jumlahBerhasil} dari {$terpilih->count()} siswa ditempatkan di {$rombel->nama}")
                     ->body(implode(' ', $alasan))
                     ->persistent()
                     ->send();

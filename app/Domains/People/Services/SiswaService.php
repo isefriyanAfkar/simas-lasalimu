@@ -183,8 +183,8 @@ class SiswaService
     /**
      * Come back to aktif. The student counts against the capacity again, so
      * every rombel the student is placed in for the active or a later school
-     * year must have room (PenempatanRombelService locks it and refuses when
-     * it is full). The account is reactivated only when it is still inactive
+     * year must have room (PenempatanRombelService locks it, counts with a
+     * locking read and refuses when it is full). A deadlock is retried. The account is reactivated only when it is still inactive
      * because of the deactivation done by ubahStatus(); see
      * UserService::aktifkanKembaliSetelahStatusKeluar().
      *
@@ -228,7 +228,7 @@ class SiswaService
             ]);
 
             return $siswa->refresh();
-        });
+        }, self::ATTEMPTS);
     }
 
     /**

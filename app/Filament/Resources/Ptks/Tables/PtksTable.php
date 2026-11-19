@@ -35,7 +35,7 @@ class PtksTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['user', 'statusKepegawaian']))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['user.roles', 'statusKepegawaian']))
             ->defaultSort(fn (Builder $query): Builder => self::orderByName($query, 'asc'))
             ->columns([
                 TextColumn::make('nama_lengkap')

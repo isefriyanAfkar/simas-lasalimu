@@ -180,8 +180,10 @@ class RombelService
      * A rombel with placements keeps its school year (the placements copy
      * it; a foreign key on both columns refuses the change too), and its
      * capacity may not drop below its active students. Runs with the rombel
-     * rows locked, and every placement locks its rombel row first, so the
-     * counts cannot change meanwhile.
+     * rows locked, and every placement locks its rombel row first. Both
+     * counts are locking reads, so they see the latest committed rows
+     * whatever the transaction read before (see
+     * RombelSiswa::jumlahSiswaAktifTerkunci()).
      *
      * @param  array<string, mixed>  $data
      */
@@ -190,7 +192,7 @@ class RombelService
         $tahunAjaranId = $data['tahun_ajaran_id'] ?? null;
 
         if (! $validator->errors()->has('tahun_ajaran_id') && is_numeric($tahunAjaranId) && (int) $tahunAjaranId !== $rombel->tahun_ajaran_id) {
-            $jumlahSiswa = $rombel->penempatan()->count();
+            $jumlahSiswa = $rombel->penempatan()->sharedLock()->count();
 
             if ($jumlahSiswa > 0) {
                 $validator->errors()->add('tahun_ajaran_id', "Tahun ajaran rombel ini tidak bisa diubah karena sudah punya {$jumlahSiswa} siswa.");
@@ -200,7 +202,7 @@ class RombelService
         $kapasitas = $data['kapasitas'] ?? null;
 
         if (! $validator->errors()->has('kapasitas') && is_numeric($kapasitas)) {
-            $jumlahAktif = $this->rombelSiswa->jumlahSiswaAktif($rombel);
+            $jumlahAktif = $this->rombelSiswa->jumlahSiswaAktifTerkunci($rombel);
 
             if ((int) $kapasitas < $jumlahAktif) {
                 $validator->errors()->add('kapasitas', "Kapasitas tidak boleh kurang dari jumlah siswa aktif di rombel ini ({$jumlahAktif}).");

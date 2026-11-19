@@ -16,7 +16,9 @@ use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PDOException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
 
@@ -341,6 +343,38 @@ class PenempatanRombelServiceTest extends TestCase
         );
 
         $this->assertSame(1, PenempatanRombel::query()->count());
+    }
+
+    public function test_a_lock_error_while_placing_several_students_is_reported_for_that_student_only(): void
+    {
+        $rombel = $this->rombel(1);
+        $ani = $this->siswa('Ani');
+        $budi = $this->siswa('Budi');
+        $citra = $this->siswa('Citra');
+        PenempatanRombel::creating(function (PenempatanRombel $penempatan) use ($budi): void {
+            if ($penempatan->siswa_id === $budi->id) {
+                throw new QueryException('mariadb', 'insert into penempatan_rombel', [], new PDOException('SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction'));
+            }
+        });
+
+        $hasil = $this->service()->tempatkanBanyak($this->operator, [$ani, $budi, $citra], $rombel);
+
+        $this->assertSame([$ani->id, $citra->id], $hasil['berhasil']);
+        $this->assertSame([$budi->id => PenempatanRombelService::PESAN_COBA_LAGI], $hasil['gagal']);
+        $this->assertEqualsCanonicalizing([$ani->id, $citra->id], PenempatanRombel::query()->pluck('siswa_id')->all());
+    }
+
+    public function test_any_other_error_while_placing_several_students_is_not_hidden(): void
+    {
+        $rombel = $this->rombel(1);
+        $budi = $this->siswa('Budi');
+        PenempatanRombel::creating(function (): void {
+            throw new RuntimeException('Rusak.');
+        });
+
+        $this->expectExceptionMessage('Rusak.');
+
+        $this->service()->tempatkanBanyak($this->operator, [$budi], $rombel);
     }
 
     private function service(): PenempatanRombelService

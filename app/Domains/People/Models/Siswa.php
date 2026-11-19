@@ -9,9 +9,11 @@ use App\Domains\People\Policies\SiswaPolicy;
 use Carbon\CarbonInterface;
 use Database\Factories\SiswaFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Attributes\UsePolicy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -59,6 +61,19 @@ class Siswa extends Model
      * @var list<string>
      */
     public const array LOGGED_ATTRIBUTES = ['user_id', 'nis', 'nisn', 'tanggal_masuk', 'asal_sekolah'];
+
+    /**
+     * Order by NIS as a number ("9999" before "10000"): the NIS is 4 to 20
+     * digits stored as text, so it is padded to 20 with leading zeros. Lists
+     * and the bulk placement use this one order.
+     *
+     * @param  Builder<Siswa>  $query
+     */
+    #[Scope]
+    protected function urutanNis(Builder $query, string $direction = 'asc'): void
+    {
+        $query->orderByRaw("LPAD(siswa.nis, 20, '0') ".($direction === 'desc' ? 'desc' : 'asc'));
+    }
 
     /**
      * @return BelongsTo<User, $this>
