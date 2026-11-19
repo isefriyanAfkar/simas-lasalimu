@@ -37,8 +37,9 @@ class WaliMuridForm
     }
 
     /**
-     * The fields of a parent, shared with the "Wali baru" form on the
-     * student's page.
+     * The fields of an existing parent. The "Wali baru" form on the student's
+     * page has its own fields (WaliRelationManager): those depend on the
+     * form state, not on a stored parent.
      *
      * @return list<mixed>
      */

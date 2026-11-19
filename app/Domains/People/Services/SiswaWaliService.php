@@ -38,9 +38,16 @@ use Illuminate\Validation\ValidationException;
  * account (wali "baru", see WaliMuridService). Every change is logged
  * explicitly (log "kesiswaan", subject the student), without the NIK.
  *
- * Every write locks the student row first, then the parent row, then reads
- * the student's relations with a lock, so two changes for one student run
- * one after the other.
+ * Lock order, the same in every path that touches siswa_wali:
+ * S (student row) → W (parent row) → users (the parent's account, or all
+ * user rows when an account is validated) → R (siswa_wali rows).
+ * WaliMuridService and Kelola Pengguna start further along the same order
+ * (W → users → R, or users → R) and never go back to an earlier step, so no
+ * two paths can wait on each other in a cycle. Locking a row again that the
+ * transaction already holds (users while saving the account) takes no new
+ * lock. A deadlock that still happens (for example on index gaps while two
+ * students get their first parent) is retried (ATTEMPTS); one that remains
+ * after the retries becomes a "coba lagi" notification (GalatKonkurensi).
  */
 class SiswaWaliService
 {
@@ -63,6 +70,9 @@ class SiswaWaliService
     ) {}
 
     /**
+     * Lock order: S → W and the parent's account (existing parent) or all
+     * user rows (new parent) → R.
+     *
      * @param  array<string, mixed>  $data  wali ("baru" or "ada"), wali_murid_id, hubungan, and for a new parent the account fields and pekerjaan
      *
      * @throws ValidationException
@@ -87,7 +97,7 @@ class SiswaWaliService
             }
 
             if ($mode === 'ada') {
-                [$wali, $pesan] = $this->parentToLink($pelaku, $siswa, $data['wali_murid_id'] ?? null);
+                [$wali, $pesan] = $this->parentToLink($pelaku, $data['wali_murid_id'] ?? null);
 
                 if ($pesan !== null) {
                     $galat['wali_murid_id'] = [$pesan];
@@ -105,11 +115,16 @@ class SiswaWaliService
                     $data['jenis_kelamin'] = $wajib->value;
                 }
 
-                $galat = [...$galat, ...$this->waliMuridService->galatData($data, null)];
+                $galat = [...$galat, ...$this->waliMuridService->galatData($pelaku, $data, null)];
 
                 if ($wajib !== null && ($data['jenis_kelamin'] ?? null) !== $wajib->value && ! isset($galat['jenis_kelamin'])) {
                     $galat['jenis_kelamin'] = [$hubungan === HubunganWali::Ayah ? 'Ayah harus laki-laki.' : 'Ibu harus perempuan.'];
                 }
+            }
+
+            // R: only after S, W and users are held.
+            if ($wali !== null && ! isset($galat['wali_murid_id']) && $this->sudahTerhubung($siswa, $wali)) {
+                $galat['wali_murid_id'] = ["{$wali->user->name} sudah menjadi wali murid {$siswa->user->name}."];
             }
 
             if ($hubungan !== null && ! isset($galat['hubungan']) && ($pesan = $this->sudahAdaAyahAtauIbu($siswa, $hubungan, null)) !== null) {
@@ -145,9 +160,12 @@ class SiswaWaliService
     }
 
     /**
+     * Lock order: S → W and the parent's account → R.
+     *
      * @param  array{hubungan?: mixed}  $data
      *
      * @throws ValidationException
+     * @throws PelanggaranAturanKesiswaan
      */
     public function ubahHubungan(User $pelaku, SiswaWali $siswaWali, array $data): SiswaWali
     {
@@ -155,8 +173,8 @@ class SiswaWaliService
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): SiswaWali => DB::transaction(function () use ($pelaku, $siswaWali, $data): SiswaWali {
             $siswa = $this->lockStudent($siswaWali->siswa);
+            $wali = $this->lockParent($siswaWali->wali_murid_id);
             $siswaWali = $this->lockRelation($siswaWali);
-            $wali = $this->lockParent($siswaWali->waliMurid);
             $hubungan = HubunganWali::tryFrom(is_string($data['hubungan'] ?? null) ? $data['hubungan'] : '');
 
             if ($hubungan === null) {
@@ -187,7 +205,8 @@ class SiswaWaliService
     }
 
     /**
-     * Make $siswaWali the student's only main contact.
+     * Make $siswaWali the student's only main contact. Lock order: S → W and
+     * the parent's account → R.
      *
      * @throws PelanggaranAturanKesiswaan
      * @throws ValidationException when a concurrent change made another one utama
@@ -198,8 +217,8 @@ class SiswaWaliService
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): SiswaWali => DB::transaction(function () use ($pelaku, $siswaWali): SiswaWali {
             $siswa = $this->lockStudent($siswaWali->siswa);
+            $wali = $this->lockParent($siswaWali->wali_murid_id);
             $siswaWali = $this->lockRelation($siswaWali);
-            $wali = $this->lockParent($siswaWali->waliMurid);
 
             if ($siswaWali->utama) {
                 throw PelanggaranAturanKesiswaan::sudahWaliUtama($wali->user->name);
@@ -230,7 +249,8 @@ class SiswaWaliService
 
     /**
      * Let a parent go from a student. The parent record and account stay
-     * (WaliMuridService::hapus() deletes a parent without children).
+     * (WaliMuridService::hapus() deletes a parent without children). Lock
+     * order: S → W and the parent's account → R.
      *
      * @throws PelanggaranAturanKesiswaan
      */
@@ -240,34 +260,35 @@ class SiswaWaliService
 
         DB::transaction(function () use ($pelaku, $siswaWali): void {
             $siswa = $this->lockStudent($siswaWali->siswa);
+            $wali = $this->lockParent($siswaWali->wali_murid_id);
             $siswaWali = $this->lockRelation($siswaWali);
 
             if ($siswaWali->utama) {
-                throw PelanggaranAturanKesiswaan::waliUtamaTidakBolehDilepas($siswaWali->waliMurid->user->name, $siswa->user->name);
+                throw PelanggaranAturanKesiswaan::waliUtamaTidakBolehDilepas($wali->user->name, $siswa->user->name);
             }
 
             $siswaWali->delete();
 
             $this->log(AksiKesiswaan::WaliDilepas, $pelaku, $siswa, [
                 'attributes' => [],
-                'old' => ['wali' => $siswaWali->waliMurid->user->name, 'hubungan' => $siswaWali->hubungan->value],
+                'old' => ['wali' => $wali->user->name, 'hubungan' => $siswaWali->hubungan->value],
             ]);
         }, self::ATTEMPTS);
     }
 
     /**
-     * The existing parent to link, or the reason it cannot be linked. Locks
-     * the parent row.
+     * The existing parent to link, locked with the account (W → users), or
+     * the reason it cannot be linked. The relation rows are checked later.
      *
      * @return array{WaliMurid|null, string|null}
      */
-    private function parentToLink(User $pelaku, Siswa $siswa, mixed $waliId): array
+    private function parentToLink(User $pelaku, mixed $waliId): array
     {
         if (! is_int($waliId) && ! (is_string($waliId) && ctype_digit($waliId))) {
             return [null, 'Pilih wali murid yang sudah ada.'];
         }
 
-        $wali = WaliMurid::query()->with('user')->lockForUpdate()->find((int) $waliId);
+        $wali = $this->lockParentOrNull((int) $waliId);
 
         if ($wali === null) {
             return [null, 'Wali murid tidak ditemukan.'];
@@ -277,22 +298,24 @@ class SiswaWaliService
             return [null, PelanggaranAturanPengguna::tidakBolehMengelola()->getMessage()];
         }
 
-        $sudah = SiswaWali::query()
-            ->where('siswa_id', $siswa->getKey())
-            ->where('wali_murid_id', $wali->getKey())
-            ->lockForUpdate()
-            ->exists();
-
-        if ($sudah) {
-            return [$wali, "{$wali->user->name} sudah menjadi wali murid {$siswa->user->name}."];
-        }
-
         return [$wali, null];
     }
 
     /**
+     * Whether the student already has this parent. A locking read (R).
+     */
+    private function sudahTerhubung(Siswa $siswa, WaliMurid $wali): bool
+    {
+        return SiswaWali::query()
+            ->where('siswa_id', $siswa->getKey())
+            ->where('wali_murid_id', $wali->getKey())
+            ->lockForUpdate()
+            ->exists();
+    }
+
+    /**
      * "Budi sudah punya ayah: Ahmad." when the student already has another
-     * parent with this single relation. A locking read.
+     * parent with this single relation. A locking read (R).
      */
     private function sudahAdaAyahAtauIbu(Siswa $siswa, HubunganWali $hubungan, ?SiswaWali $kecuali): ?string
     {
@@ -327,6 +350,10 @@ class SiswaWaliService
         return sprintf('%s tercatat %s, tidak bisa menjadi %s.', $wali->user->name, mb_strtolower($tercatat->label()), mb_strtolower($hubungan->label()));
     }
 
+    /**
+     * The parent's account row is already locked (lockParent), so this takes
+     * no new lock.
+     */
     private function isiJenisKelamin(User $pelaku, WaliMurid $wali, HubunganWali $hubungan): void
     {
         $wajib = $hubungan->jenisKelamin();
@@ -336,19 +363,42 @@ class SiswaWaliService
         }
     }
 
+    /**
+     * Step S of the lock order.
+     */
     private function lockStudent(Siswa $siswa): Siswa
     {
         return Siswa::query()->with('user')->lockForUpdate()->findOrFail($siswa->getKey());
     }
 
-    private function lockParent(WaliMurid $wali): WaliMurid
+    /**
+     * Steps W and users of the lock order: the parent row, then the parent's
+     * account row.
+     */
+    private function lockParent(int $waliId): WaliMurid
     {
-        return WaliMurid::query()->with('user')->lockForUpdate()->findOrFail($wali->getKey());
+        return $this->lockParentOrNull($waliId) ?? throw PelanggaranAturanKesiswaan::hubunganSudahTidakAda();
     }
 
+    private function lockParentOrNull(int $waliId): ?WaliMurid
+    {
+        $wali = WaliMurid::query()->with('user')->lockForUpdate()->find($waliId);
+
+        if ($wali !== null) {
+            User::query()->whereKey($wali->user_id)->lockForUpdate()->first(['id']);
+        }
+
+        return $wali;
+    }
+
+    /**
+     * Step R of the lock order. The relation may have been let go by someone
+     * else meanwhile.
+     */
     private function lockRelation(SiswaWali $siswaWali): SiswaWali
     {
-        return SiswaWali::query()->with('waliMurid.user')->lockForUpdate()->findOrFail($siswaWali->getKey());
+        return SiswaWali::query()->with('waliMurid.user')->lockForUpdate()->find($siswaWali->getKey())
+            ?? throw PelanggaranAturanKesiswaan::hubunganSudahTidakAda();
     }
 
     private function ensureCanManage(User $pelaku, User $user): void

@@ -39,6 +39,35 @@ CLAUDE.md.
   - Contoh: `RombelSiswa::jumlahSiswaAktifTerkunci()` dan
     `RombelService::delete()`. Test-nya memeriksa SQL hitungan itu; lihat
     `tests/Feature/Domains/Academic/Services/HitunganKapasitasTerkunciTest.php`.
+- Semua jalur yang mengunci beberapa tabel yang sama memakai satu urutan
+  kunci. Jalur yang berangkat dari tengah urutan melanjutkan dari situ dan
+  tidak pernah kembali ke langkah sebelumnya.
+  - Contoh siswa dan wali: S (siswa) → W (wali_murid) → users → R
+    (siswa_wali).
+  - Jalur yang berangkat dari wali memakai W → users → R; Kelola Pengguna
+    memakai users → R.
+  - Alasannya: dua transaksi yang mengunci dua baris dengan urutan
+    berlawanan bisa saling menunggu (*deadlock*). Dengan satu urutan,
+    siklus seperti itu tidak bisa terbentuk.
+  - Mengunci ulang baris yang sudah dipegang transaksi itu sendiri
+    diperbolehkan, karena tidak menambah kunci baru. Mengunci *semua* baris
+    sebuah tabel (misalnya `UserService::lockUsers()` saat akun divalidasi)
+    tetap kunci baru walaupun satu barisnya sudah dipegang, jadi harus
+    terjadi di langkahnya sendiri.
+  - Tulis urutannya di docblock setiap Service yang memakainya. Contoh:
+    `SiswaWaliService` dan `WaliMuridService`.
+  - Test-nya memeriksa urutan pembacaan berkunci di SQL; lihat
+    `tests/Feature/Domains/People/Services/UrutanKunciWaliTest.php`.
+- *Deadlock* yang tetap bisa terjadi (misalnya *gap lock* saat dua siswa
+  mendapat wali pertamanya bersamaan) diterima dan ditangani dua lapis:
+  - transaksi Service memakai `attempts`, sehingga Laravel mencobanya ulang;
+  - galat 1213 (*deadlock*) dan 1205 (*lock wait timeout*) yang masih
+    tersisa sesudah percobaan ulang diubah di satu tempat,
+    `App\Filament\Support\GalatKonkurensi`, menjadi notifikasi "Sedang ada
+    perubahan lain pada data ini. Coba lagi.". Ini berlaku untuk semua aksi
+    Filament, jadi layar tidak perlu menangkapnya sendiri.
+  - Pengecualian: aksi massal yang melapor per baris (penempatan beberapa
+    siswa) tetap menangkapnya per baris dan melanjutkan baris berikutnya.
 - Field unik (kode, nama, username, email) dijaga dua lapis:
   - validasi `unique` dijalankan di dalam `DB::transaction(..., attempts)`
     setelah baris tabelnya dikunci dengan `lockForUpdate`, jadi dua

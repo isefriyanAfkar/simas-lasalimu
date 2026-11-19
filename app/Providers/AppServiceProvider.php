@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Domains\Foundation\Policies\ActivityPolicy;
+use App\Filament\Support\GalatKonkurensi;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Activitylog\Models\Activity;
@@ -23,5 +24,6 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(Activity::class, ActivityPolicy::class);
+        GalatKonkurensi::daftarkan();
     }
 }

@@ -7,6 +7,7 @@ use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Enums\JenisKelamin;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
+use App\Domains\People\Services\JenisKelaminWali;
 use BackedEnum;
 use Carbon\CarbonInterface;
 use Closure;
@@ -143,6 +144,8 @@ class UserService
 
     public const string PESAN_USERNAME_DICADANGKAN = 'Username ini dicadangkan untuk akun siswa atau wali.';
 
+    public const string PESAN_NIK_TERDAFTAR = 'NIK ini sudah terdaftar di sistem.';
+
     public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
     /**
@@ -263,13 +266,22 @@ class UserService
                 }
             }
 
-            if ($user->waliMurid()->exists()) {
+            $wali = $user->waliMurid()->first();
+
+            if ($wali !== null) {
                 if ($data['username'] !== $user->getOriginal('username')) {
                     throw ValidationException::withMessages(['username' => self::PESAN_USERNAME_WALI]);
                 }
 
                 if ($peran !== null) {
                     throw ValidationException::withMessages(['peran' => self::PESAN_PERAN_WALI]);
+                }
+
+                // users (held) → R: the tail of the lock order S → W → users → R.
+                [$data, $galatJenisKelamin] = JenisKelaminWali::sesuaikan($wali, $data);
+
+                if ($galatJenisKelamin !== []) {
+                    throw ValidationException::withMessages($galatJenisKelamin);
                 }
             }
 
@@ -552,15 +564,16 @@ class UserService
      * SiswaWaliService), without writing: only the name is required; the
      * biodata rules and NIK protection are the same. The username is set by
      * simpanAkunWali(), never taken from $data. Must run inside a transaction
-     * (it locks the user rows).
+     * (it locks the user rows). A NIK held by someone else is named only for
+     * $pelaku with the Cari NIK permission (see pesanNikDipakaiUntukWali()).
      *
      * @param  array<string, mixed>  $data
      *
      * @throws ValidationException
      */
-    public function validasiAkunWali(array $data, ?User $user): void
+    public function validasiAkunWali(User $pelaku, array $data, ?User $user): void
     {
-        $this->validateAccountData($this->denganUsernameWali($data, $user), $user, akunTanpaPanel: true, akunWali: true);
+        $this->validateAccountData($this->denganUsernameWali($data, $user), $user, akunTanpaPanel: true, akunWali: true, pelaku: $pelaku);
     }
 
     /**
@@ -586,6 +599,34 @@ class UserService
             fn (User $lama) => null,
             akunWali: true,
         );
+    }
+
+    /**
+     * Log that $pelaku was shown who holds a NIK (the parent form's NIK
+     * message or duplicate warning), as a Cari NIK entry without the NIK.
+     * Inside a transaction the entry is written after it ends, also when it
+     * is rolled back: the NIK message itself always ends the save with a
+     * field error, and the name was shown all the same.
+     */
+    public function catatPemilikNikDitampilkan(User $pelaku, User $pemilik): void
+    {
+        $tulis = function () use ($pelaku, $pemilik): void {
+            activity(self::LOG_NAME)
+                ->causedBy($pelaku)
+                ->performedOn($pemilik)
+                ->event(AksiPengguna::NikDicari->value)
+                ->withProperty('konteks', 'form wali murid')
+                ->log(AksiPengguna::NikDicari->label());
+        };
+
+        if (DB::transactionLevel() === 0) {
+            $tulis();
+
+            return;
+        }
+
+        DB::afterRollBack($tulis);
+        DB::afterCommit($tulis);
     }
 
     /**
@@ -874,7 +915,7 @@ class UserService
      *
      * @throws ValidationException
      */
-    private function validateAccountData(array $data, ?User $ignore, bool $akunTanpaPanel = false, bool $akunWali = false): array
+    private function validateAccountData(array $data, ?User $ignore, bool $akunTanpaPanel = false, bool $akunWali = false, ?User $pelaku = null): array
     {
         $this->lockUsers();
 
@@ -900,7 +941,7 @@ class UserService
             'name' => ['required', 'string', 'max:255'],
             'username' => self::usernameRules($ignore),
             'email' => self::emailRules($ignore),
-            ...Arr::only($this->biodataRules($ignore, $akunWali), array_keys($biodata)),
+            ...Arr::only($this->biodataRules($ignore, $akunWali, $pelaku), array_keys($biodata)),
         ];
 
         if ($akunTanpaPanel) {
@@ -953,12 +994,12 @@ class UserService
      *
      * @return array<string, list<mixed>>
      */
-    private function biodataRules(?User $ignore, bool $akunWali = false): array
+    private function biodataRules(?User $ignore, bool $akunWali = false, ?User $pelaku = null): array
     {
         $currentFoto = $ignore?->foto;
 
         return [
-            'nik' => ['bail', 'nullable', 'string', 'regex:/^\d{16}$/', function (string $attribute, mixed $value, Closure $fail) use ($ignore, $akunWali): void {
+            'nik' => ['bail', 'nullable', 'string', 'regex:/^\d{16}$/', function (string $attribute, mixed $value, Closure $fail) use ($ignore, $akunWali, $pelaku): void {
                 try {
                     $pemilik = User::query()
                         ->denganNik((string) $value)
@@ -971,7 +1012,7 @@ class UserService
                 }
 
                 if ($pemilik !== null) {
-                    $fail($akunWali ? self::pesanNikDipakaiUntukWali($pemilik) : 'NIK ini sudah terdaftar pada pengguna lain.');
+                    $fail($akunWali ? $this->pesanNikDipakaiUntukWali($pemilik, $pelaku) : 'NIK ini sudah terdaftar pada pengguna lain.');
                 }
             }],
             'hapus_nik' => ['boolean'],
@@ -1188,7 +1229,7 @@ class UserService
         }
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data, $peran, $kunciLogPeran, $aturPeran, $akunWali): User {
-            $data = $this->validateAccountData($data, $user, akunTanpaPanel: true, akunWali: $akunWali);
+            $data = $this->validateAccountData($data, $user, akunTanpaPanel: true, akunWali: $akunWali, pelaku: $pelaku);
             $this->ensureCanGrantRole($pelaku, $peran);
 
             if ($user === null) {
@@ -1297,23 +1338,35 @@ class UserService
     }
 
     /**
-     * The NIK message on the parent form names who holds the NIK (never the
-     * NIK itself): another parent is the same person, so that record should
-     * be chosen; a staff member keeps it, so the parent record goes without.
+     * The NIK message on the parent form. Naming who holds a NIK is a NIK
+     * lookup, so the name appears only for $pelaku with the Cari NIK
+     * permission (UserPolicy::searchNik), and every time it does it is logged
+     * like Cari NIK, without the NIK. Another parent is the same person, so
+     * that record should be chosen; a staff member keeps the NIK, so the
+     * parent record goes without. Anyone else only learns that the NIK is
+     * taken.
      */
-    private static function pesanNikDipakaiUntukWali(User $pemilik): string
+    private function pesanNikDipakaiUntukWali(User $pemilik, ?User $pelaku): string
     {
+        if ($pelaku === null || ! $pelaku->can('searchNik', User::class)) {
+            return self::PESAN_NIK_TERDAFTAR;
+        }
+
         if ($pemilik->waliMurid()->exists()) {
+            $this->catatPemilikNikDitampilkan($pelaku, $pemilik);
+
             return "NIK ini milik wali {$pemilik->name}. Pilih wali yang sudah ada.";
         }
 
         $ptk = $pemilik->ptk()->first();
 
         if ($ptk !== null) {
+            $this->catatPemilikNikDitampilkan($pelaku, $pemilik);
+
             return "NIK ini milik guru/staf {$ptk->nama_lengkap}. Kosongkan NIK untuk data wali ini.";
         }
 
-        return 'NIK ini sudah terdaftar pada pengguna lain.';
+        return self::PESAN_NIK_TERDAFTAR;
     }
 
     /**

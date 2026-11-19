@@ -4,6 +4,7 @@ namespace Tests\Feature\Domains\People\Services;
 
 use App\Domains\Foundation\Enums\JenisKelamin;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\HubunganWali;
 use App\Domains\People\Models\Ptk;
 use App\Domains\People\Models\Siswa;
@@ -20,6 +21,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -437,6 +440,60 @@ class SiswaWaliServiceTest extends TestCase
         foreach (Activity::query()->get() as $activity) {
             $this->assertStringNotContainsString(self::NIK, json_encode($activity->toArray()));
         }
+    }
+
+    public function test_naming_the_staff_owner_of_a_nik_is_logged_like_a_nik_lookup(): void
+    {
+        $guru = User::factory()->create(['name' => 'Hafida']);
+        $guru->isiNik(self::NIK);
+        $guru->save();
+        Ptk::factory()->for($guru)->create();
+
+        $this->assertValidationError('nik', fn () => $this->service()->tambahkan($this->operator, $this->siswa('Budi'), $this->baru(['nik' => self::NIK])));
+
+        $log = Activity::query()->where('event', 'nik_dicari')->sole();
+        $this->assertSame('pengguna', $log->log_name);
+        $this->assertTrue($log->causer->is($this->operator));
+        $this->assertTrue($log->subject->is($guru));
+        $this->assertSame('form wali murid', $log->getProperty('konteks'));
+        $this->assertStringNotContainsString(self::NIK, json_encode($log->toArray()));
+    }
+
+    public function test_without_the_nik_lookup_permission_the_owner_is_not_named_nor_logged(): void
+    {
+        Role::findByName('operator', 'web')->revokePermissionTo('ViewNik:User');
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $operator = User::factory()->operator()->create();
+        $guru = User::factory()->create(['name' => 'Hafida']);
+        $guru->isiNik(self::NIK);
+        $guru->save();
+        Ptk::factory()->for($guru)->create();
+        $this->service()->tambahkan($this->operator, $this->siswa('Ani'), $this->baru(['name' => 'Ahmad', 'nik' => '7404012345670099']));
+        Activity::query()->delete();
+
+        foreach ([[self::NIK, 'guru'], ['7404012345670099', 'wali']] as [$nik, $pemilik]) {
+            try {
+                $this->service()->tambahkan($operator, $this->siswa('Budi '.$pemilik), $this->baru(['name' => 'Baru', 'nik' => $nik]));
+                $this->fail('A taken NIK was accepted.');
+            } catch (ValidationException $exception) {
+                $this->assertSame([UserService::PESAN_NIK_TERDAFTAR], $exception->errors()['nik'], "Pemilik: {$pemilik}");
+            }
+        }
+
+        $this->assertSame(0, Activity::query()->where('event', 'nik_dicari')->count());
+    }
+
+    public function test_a_relation_let_go_meanwhile_gives_a_message_instead_of_an_error(): void
+    {
+        $budi = $this->siswa('Budi');
+        $this->service()->tambahkan($this->operator, $budi, $this->baru(['name' => 'Ahmad']));
+        $paman = $this->service()->tambahkan($this->operator, $budi, $this->baru(['name' => 'Paman', 'hubungan' => 'wali']));
+        $basi = $paman->fresh();
+        $this->service()->lepas($this->operator, $paman);
+
+        $pesan = PelanggaranAturanKesiswaan::hubunganSudahTidakAda()->getMessage();
+        $this->assertRejected($pesan, fn () => $this->service()->jadikanUtama($this->operator, $basi));
+        $this->assertRejected($pesan, fn () => $this->service()->lepas($this->operator, $basi));
     }
 
     private function service(): SiswaWaliService

@@ -52,6 +52,14 @@ class WaliRelationManager extends RelationManager
     protected static ?string $modelLabel = 'wali murid';
 
     /**
+     * calonGanda() per [no_hp, nik] for the current request only: a private
+     * property is not kept between Livewire requests.
+     *
+     * @var array<string, array<int|string, string>>
+     */
+    private array $calonGandaPerPermintaan = [];
+
+    /**
      * Whoever may view the student and the parent list.
      */
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
@@ -201,12 +209,12 @@ class WaliRelationManager extends RelationManager
                     ->hiddenLabel()
                     ->state('Nomor HP atau NIK ini sama dengan wali yang sudah ada. Mungkin orangnya sama.')
                     ->color('warning')
-                    ->visible(fn (Get $get): bool => self::calonGanda($get) !== []),
+                    ->visible(fn (Get $get): bool => $this->calonGanda($get) !== []),
                 Radio::make('pakai_wali')
                     ->label('Pilih')
-                    ->options(fn (Get $get): array => self::calonGanda($get) + ['baru' => 'Tetap buat wali baru'])
-                    ->visible(fn (Get $get): bool => self::calonGanda($get) !== [])
-                    ->required(fn (Get $get): bool => self::calonGanda($get) !== []),
+                    ->options(fn (Get $get): array => $this->calonGanda($get) + ['baru' => 'Tetap buat wali baru'])
+                    ->visible(fn (Get $get): bool => $this->calonGanda($get) !== [])
+                    ->required(fn (Get $get): bool => $this->calonGanda($get) !== []),
                 Select::make('hubungan')
                     ->label('Hubungan')
                     ->options(HubunganWali::options())
@@ -229,11 +237,14 @@ class WaliRelationManager extends RelationManager
 
     /**
      * For the "Wali baru" form: existing parents with the same phone number
-     * (any format) or NIK, as [id => "Pakai Ahmad (anak: Budi, Ani)"].
+     * (any format), or the same NIK for whoever may look a NIK up, as
+     * [id => "Pakai Ahmad · 0812****7890 · anak: Budi, Ani"]. Computed once
+     * per request (the form asks four times per render), so a NIK match is
+     * looked up and logged once per render.
      *
      * @return array<int|string, string>
      */
-    private static function calonGanda(Get $get): array
+    private function calonGanda(Get $get): array
     {
         if ($get('wali') !== 'baru') {
             return [];
@@ -241,11 +252,20 @@ class WaliRelationManager extends RelationManager
 
         $noHp = $get('no_hp');
         $nik = $get('nik');
+        $kunci = json_encode([$noHp, $nik]);
 
-        return app(WaliMuridService::class)
-            ->calonGanda(is_string($noHp) ? $noHp : null, is_string($nik) ? $nik : null)
+        return $this->calonGandaPerPermintaan[$kunci] ??= app(WaliMuridService::class)
+            ->calonGanda($this->pelaku(), is_string($noHp) ? $noHp : null, is_string($nik) ? $nik : null)
             ->mapWithKeys(fn (WaliMurid $wali): array => [$wali->getKey() => 'Pakai '.self::labelWali($wali)])
             ->all();
+    }
+
+    private function pelaku(): User
+    {
+        /** @var User $pelaku */
+        $pelaku = Filament::auth()->user();
+
+        return $pelaku;
     }
 
     /**

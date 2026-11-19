@@ -22,8 +22,11 @@ use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Activitylog\Models\Activity;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -88,11 +91,11 @@ class WaliMuridServiceTest extends TestCase
         $siti = $this->wali('Siti', ['nik' => self::NIK]);
         $this->wali('Lain', ['no_hp' => '6285299990000']);
 
-        $this->assertSame([$ahmad->id], $this->service()->calonGanda('0812 3456 7890', null)->modelKeys());
-        $this->assertSame([$ahmad->id], $this->service()->calonGanda('+6281234567890', null)->modelKeys());
-        $this->assertSame([$siti->id], $this->service()->calonGanda(null, self::NIK)->modelKeys());
-        $this->assertSame([], $this->service()->calonGanda('0811', null)->all());
-        $this->assertSame([], $this->service()->calonGanda(null, null)->all());
+        $this->assertSame([$ahmad->id], $this->service()->calonGanda($this->operator, '0812 3456 7890', null)->modelKeys());
+        $this->assertSame([$ahmad->id], $this->service()->calonGanda($this->operator, '+6281234567890', null)->modelKeys());
+        $this->assertSame([$siti->id], $this->service()->calonGanda($this->operator, null, self::NIK)->modelKeys());
+        $this->assertSame([], $this->service()->calonGanda($this->operator, '0811', null)->all());
+        $this->assertSame([], $this->service()->calonGanda($this->operator, null, null)->all());
     }
 
     public function test_editing_changes_the_biodata_and_the_job_but_never_the_username(): void
@@ -247,6 +250,78 @@ class WaliMuridServiceTest extends TestCase
         }
 
         $this->assertSame(0, Ptk::query()->count());
+    }
+
+    public function test_a_nik_match_warns_and_is_logged_only_for_whoever_may_look_a_nik_up(): void
+    {
+        $siti = $this->wali('Siti', ['nik' => self::NIK, 'no_hp' => '081299990000']);
+        Activity::query()->delete();
+
+        $this->assertSame([$siti->id], $this->service()->calonGanda($this->operator, null, self::NIK)->modelKeys());
+        $log = Activity::query()->where('event', 'nik_dicari')->sole();
+        $this->assertTrue($log->subject->is($siti->user));
+        $this->assertStringNotContainsString(self::NIK, json_encode($log->toArray()));
+
+        Role::findByName('operator', 'web')->revokePermissionTo('ViewNik:User');
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $tanpaIzin = User::factory()->operator()->create();
+
+        $this->assertSame([], $this->service()->calonGanda($tanpaIzin, null, self::NIK)->all());
+        $this->assertSame([$siti->id], $this->service()->calonGanda($tanpaIzin, '+6281299990000', self::NIK)->modelKeys());
+        $this->assertSame(1, Activity::query()->where('event', 'nik_dicari')->count());
+    }
+
+    public function test_kelola_pengguna_follows_the_gender_rule_of_a_parent(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $ahmad = $this->wali('Ahmad', ['jenis_kelamin' => 'laki-laki']);
+        $this->hubungkan($ahmad, 'Budi', HubunganWali::Ayah);
+        $user = $ahmad->user->fresh();
+        $data = ['name' => 'Ahmad', 'username' => $user->username, 'email' => null, 'peran' => null];
+
+        try {
+            app(UserService::class)->update($superAdmin, $user, [...$data, 'jenis_kelamin' => 'perempuan']);
+            $this->fail('A father became female in Kelola Pengguna.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['Ahmad adalah ayah Budi, jadi harus laki-laki.'], $exception->errors()['jenis_kelamin']);
+        }
+
+        app(UserService::class)->update($superAdmin, $user->fresh(), [...$data, 'jenis_kelamin' => null]);
+        $this->assertSame(JenisKelamin::LakiLaki, $user->fresh()->jenis_kelamin);
+    }
+
+    /**
+     * @return array<string, array{Closure(): User}>
+     */
+    public static function accountsThatAreNotParents(): array
+    {
+        return [
+            'tanpa role' => [fn (): User => User::factory()->create()],
+            'operator' => [fn (): User => User::factory()->operator()->create()],
+            'wali yang juga guru' => [function (): User {
+                $user = User::factory()->create();
+                $user->assignRole('wali');
+                Ptk::factory()->for($user)->create();
+
+                return $user;
+            }],
+        ];
+    }
+
+    /**
+     * @param  Closure(): User  $akun
+     */
+    #[DataProvider('accountsThatAreNotParents')]
+    public function test_deleting_an_account_is_refused_unless_it_is_a_plain_parent_account(Closure $akun): void
+    {
+        $user = $akun();
+
+        try {
+            app(UserService::class)->hapusAkunWali(User::factory()->superAdmin()->create(), $user);
+            $this->fail('A non-parent account was deleted.');
+        } catch (LogicException) {
+            $this->assertNotNull($user->fresh());
+        }
     }
 
     private function service(): WaliMuridService

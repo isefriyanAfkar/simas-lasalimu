@@ -43,6 +43,11 @@ class PelanggaranAturanKesiswaan extends RuntimeException
         return new self("{$namaWali} sudah menjadi wali utama.");
     }
 
+    public static function hubunganSudahTidakAda(): self
+    {
+        return new self('Data wali ini sudah diubah atau dilepas pengguna lain. Muat ulang halaman.');
+    }
+
     public static function waliMasihTerhubung(string $namaWali, int $jumlahSiswa): self
     {
         return new self("{$namaWali} masih terhubung ke {$jumlahSiswa} siswa. Lepas dulu dari semua siswanya.");

@@ -7,7 +7,6 @@ use App\Domains\Foundation\Services\KunciNikTidakSiap;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\AksiKesiswaan;
-use App\Domains\People\Enums\HubunganWali;
 use App\Domains\People\Models\SiswaWali;
 use App\Domains\People\Models\WaliMurid;
 use Closure;
@@ -31,15 +30,19 @@ use Spatie\Activitylog\Support\CauserResolver;
  *   as 08..., +62... or 62..., also in part.
  * - pekerjaan is optional, at most 100 characters.
  * - The gender may not contradict a relation to any student: an ayah is
- *   male, an ibu female. An empty gender is filled in from such a relation.
+ *   male, an ibu female. An empty gender is filled in from such a relation
+ *   (JenisKelaminWali).
  * - A parent who is the main contact of a student cannot be marked as died
  *   until another main contact is chosen.
  * - A parent linked to no student may be deleted, together with the
  *   account; a linked one cannot.
  * - The died flag and deleting are logged explicitly (log "kesiswaan").
  *
- * Every write locks the parent row first, then reads its relations with a
- * lock (the order SiswaWaliService uses after locking the student).
+ * Lock order: these paths start from the parent and follow the order of
+ * SiswaWaliService without its first step: W (parent row) → users (the
+ * parent's account, or all user rows when the account is validated) → R
+ * (siswa_wali rows). They never lock a student row, so they cannot wait on a
+ * SiswaWaliService path that holds one (see the SiswaWaliService docblock).
  */
 class WaliMuridService
 {
@@ -95,40 +98,52 @@ class WaliMuridService
     }
 
     /**
-     * Parents that may be the same person as a new one: the same phone
-     * number (in any format) or the same NIK. Used to warn before saving; it
-     * never blocks.
+     * Parents that may be the same person as a new one, to warn before
+     * saving; it never blocks.
+     * - The same phone number, in any format, always counts.
+     * - The same NIK counts only for whoever may look a NIK up (the Cari NIK
+     *   permission, UserPolicy::searchNik): showing who holds a NIK is a NIK
+     *   lookup, so every parent found that way is logged like Cari NIK,
+     *   without the NIK. For anyone else a NIK never matches.
      *
      * @return Collection<int, WaliMurid>
      */
-    public function calonGanda(?string $noHp, ?string $nik): Collection
+    public function calonGanda(User $pelaku, ?string $noHp, ?string $nik): Collection
     {
         $noHp = filled($noHp) ? UserService::normalisasiNoHp((string) $noHp) : null;
-        $userIds = [];
+        $userIdsNik = [];
 
-        if (is_string($nik) && preg_match('/^\d{16}$/', $nik) === 1) {
+        if (is_string($nik) && preg_match('/^\d{16}$/', $nik) === 1 && $pelaku->can('searchNik', User::class)) {
             try {
-                $userIds = User::query()->denganNik($nik)->pluck('id')->all();
+                $userIdsNik = User::query()->denganNik($nik)->pluck('id')->all();
             } catch (KunciNikTidakSiap) {
-                $userIds = [];
+                $userIdsNik = [];
             }
         }
 
-        if ($noHp === null && $userIds === []) {
+        if ($noHp === null && $userIdsNik === []) {
             return new Collection;
         }
 
-        return WaliMurid::query()
+        $calon = WaliMurid::query()
             ->with(['user', 'siswaWali.siswa.user'])
             ->where(fn ($query) => $query
                 ->when($noHp !== null, fn ($query) => $query->orWhereHas('user', fn ($user) => $user->where('no_hp', $noHp)))
-                ->when($userIds !== [], fn ($query) => $query->orWhereIn('user_id', $userIds)))
+                ->when($userIdsNik !== [], fn ($query) => $query->orWhereIn('user_id', $userIdsNik)))
             ->get();
+
+        foreach ($calon as $wali) {
+            if (in_array($wali->user_id, $userIdsNik, true)) {
+                $this->userService->catatPemilikNikDitampilkan($pelaku, $wali->user);
+            }
+        }
+
+        return $calon;
     }
 
     /**
      * Create a parent and the account. For SiswaWaliService, inside its
-     * transaction, after it validated $data (validasi()).
+     * transaction, after it collected the field errors (galatData()).
      *
      * @param  array<string, mixed>  $data
      */
@@ -147,22 +162,24 @@ class WaliMuridService
     /**
      * The field errors of a new parent ($wali null) or of a change, without
      * writing: the account fields and pekerjaan. Must run inside a
-     * transaction.
+     * transaction; it locks all user rows (the users step of the lock order).
+     * The NIK message names who holds the NIK only for $pelaku with the Cari
+     * NIK permission, and logs it (UserService).
      *
      * @param  array<string, mixed>  $data
      * @return array<string, list<string>>
      */
-    public function galatData(array $data, ?WaliMurid $wali): array
+    public function galatData(User $pelaku, array $data, ?WaliMurid $wali): array
     {
         return [
-            ...self::errorsOf(fn () => $this->userService->validasiAkunWali(Arr::only($data, self::FIELD_AKUN), $wali?->user)),
+            ...self::errorsOf(fn () => $this->userService->validasiAkunWali($pelaku, Arr::only($data, self::FIELD_AKUN), $wali?->user)),
             ...self::errorsOf(fn () => $this->validasiPekerjaan($data)),
         ];
     }
 
     /**
      * Change the biodata and the job. The username and the account status
-     * never change here.
+     * never change here. Lock order: W → users → R.
      *
      * @param  array<string, mixed>  $data
      *
@@ -174,8 +191,9 @@ class WaliMuridService
 
         return DB::transaction(function () use ($pelaku, $wali, $data): WaliMurid {
             $wali = $this->lockParent($wali);
-            [$data, $galat] = $this->jenisKelaminSesuaiHubungan($wali, $data);
-            $galat = [...$this->galatData($data, $wali), ...$galat];
+            $galat = $this->galatData($pelaku, $data, $wali);
+            [$data, $galatJenisKelamin] = JenisKelaminWali::sesuaikan($wali, $data);
+            $galat = [...$galat, ...$galatJenisKelamin];
 
             if ($galat !== []) {
                 throw ValidationException::withMessages($galat);
@@ -191,7 +209,7 @@ class WaliMuridService
 
     /**
      * Mark a parent as died, or take the mark back. A parent who is still the
-     * main contact of a student cannot be marked.
+     * main contact of a student cannot be marked. Lock order: W → users → R.
      *
      * @throws PelanggaranAturanKesiswaan
      */
@@ -236,7 +254,8 @@ class WaliMuridService
     }
 
     /**
-     * Delete a parent linked to no student, together with the account.
+     * Delete a parent linked to no student, together with the account. Lock
+     * order: W → users → R.
      *
      * @throws PelanggaranAturanKesiswaan
      */
@@ -289,51 +308,15 @@ class WaliMuridService
     }
 
     /**
-     * The gender checked against every ayah or ibu relation of the parent:
-     * empty is filled in from it, a contradiction is a field error naming the
-     * student. Must run with the parent row locked.
-     *
-     * @param  array<string, mixed>  $data
-     * @return array{array<string, mixed>, array<string, list<string>>}
+     * Steps W and users of the lock order: the parent row, then the parent's
+     * account row.
      */
-    private function jenisKelaminSesuaiHubungan(WaliMurid $wali, array $data): array
-    {
-        $relasi = $wali->siswaWali()
-            ->with('siswa.user')
-            ->whereIn('hubungan', [HubunganWali::Ayah->value, HubunganWali::Ibu->value])
-            ->lockForUpdate()
-            ->get();
-
-        foreach ($relasi as $siswaWali) {
-            $wajib = $siswaWali->hubungan->jenisKelamin();
-
-            if ($wajib === null) {
-                continue;
-            }
-
-            if (blank($data['jenis_kelamin'] ?? null)) {
-                $data['jenis_kelamin'] = $wajib->value;
-
-                continue;
-            }
-
-            if ($data['jenis_kelamin'] !== $wajib->value) {
-                return [$data, ['jenis_kelamin' => [sprintf(
-                    '%s adalah %s %s, jadi harus %s.',
-                    $wali->user->name,
-                    mb_strtolower($siswaWali->hubungan->label()),
-                    $siswaWali->siswa->user->name,
-                    mb_strtolower($wajib->label()),
-                )]]];
-            }
-        }
-
-        return [$data, []];
-    }
-
     private function lockParent(WaliMurid $wali): WaliMurid
     {
-        return WaliMurid::query()->with('user')->lockForUpdate()->findOrFail($wali->getKey());
+        $wali = WaliMurid::query()->with('user')->lockForUpdate()->findOrFail($wali->getKey());
+        User::query()->whereKey($wali->user_id)->lockForUpdate()->first(['id']);
+
+        return $wali;
     }
 
     private function ensureCanManage(User $pelaku, WaliMurid $wali): void
