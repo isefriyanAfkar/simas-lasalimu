@@ -7,6 +7,7 @@ use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Models\Siswa;
+use App\Domains\People\Models\WaliMurid;
 use App\Filament\Pages\Auth\Login;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
@@ -47,22 +48,38 @@ class UserResourceTest extends TestCase
             ->assertCanSeeTableRecords([$superAdmin, $operator]);
     }
 
-    public function test_student_accounts_are_hidden_by_default_and_shown_by_the_filter(): void
+    public function test_student_and_parent_accounts_are_hidden_by_default_and_shown_by_the_filter(): void
     {
         $superAdmin = User::factory()->superAdmin()->create();
         $guru = User::factory()->create();
         $siswa = Siswa::factory()->create();
+        $wali = WaliMurid::factory()->create();
 
         $this->actingAs($superAdmin);
 
         Livewire::test(ListUsers::class)
             ->assertCanSeeTableRecords([$superAdmin, $guru])
-            ->assertCanNotSeeTableRecords([$siswa->user])
-            ->filterTable('akun_siswa', true)
+            ->assertCanNotSeeTableRecords([$siswa->user, $wali->user])
+            ->filterTable('jenis_akun', 'siswa')
             ->assertCanSeeTableRecords([$siswa->user])
-            ->assertCanNotSeeTableRecords([$superAdmin, $guru])
-            ->filterTable('akun_siswa', null)
-            ->assertCanSeeTableRecords([$superAdmin, $guru, $siswa->user]);
+            ->assertCanNotSeeTableRecords([$superAdmin, $guru, $wali->user])
+            ->filterTable('jenis_akun', 'wali')
+            ->assertCanSeeTableRecords([$wali->user])
+            ->assertCanNotSeeTableRecords([$superAdmin, $guru, $siswa->user])
+            ->filterTable('jenis_akun', null)
+            ->assertCanSeeTableRecords([$superAdmin, $guru, $siswa->user, $wali->user]);
+    }
+
+    public function test_the_form_shows_the_reserved_username_error(): void
+    {
+        $this->actingAs(User::factory()->superAdmin()->create());
+
+        Livewire::test(CreateUser::class)
+            ->fillForm(['name' => 'Ani', 'username' => 'wali00007', 'password' => 'Rahasia#2026!', 'password_confirmation' => 'Rahasia#2026!'])
+            ->call('create')
+            ->assertHasFormErrors(['username']);
+
+        $this->assertDatabaseMissing('users', ['username' => 'wali00007']);
     }
 
     public function test_operator_without_user_permission_gets_403_on_the_user_list(): void

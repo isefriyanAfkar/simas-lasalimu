@@ -117,6 +117,21 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * The phone number written as people know it, with the middle hidden:
+     * 6281234567890 becomes "0812*****7890". Null without a number.
+     */
+    public function noHpTersamar(): ?string
+    {
+        if ($this->no_hp === null) {
+            return null;
+        }
+
+        $lokal = str_starts_with($this->no_hp, '62') ? '0'.substr($this->no_hp, 2) : $this->no_hp;
+
+        return substr($lokal, 0, 4).str_repeat('*', max(strlen($lokal) - 8, 0)).substr($lokal, -4);
+    }
+
+    /**
      * The protected URL of the photo (route pengguna.foto), or null. The
      * "v" parameter changes with the file, so a replaced photo is not served
      * from the browser cache.

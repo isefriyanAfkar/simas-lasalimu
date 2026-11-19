@@ -25,6 +25,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,7 +33,9 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * No delete action: students are never deleted. The search box looks in the
- * name, the NIS and the NISN; it never searches a NIK.
+ * name, the NIS and the NISN; it never searches a NIK. Two filters help the
+ * school collect parents' phone numbers: the main contact has no phone
+ * number, and no parent at all.
  */
 class SiswasTable
 {
@@ -86,6 +89,16 @@ class SiswasTable
                 SelectFilter::make('status')
                     ->label('Status')
                     ->options(StatusSiswa::options()),
+                Filter::make('wali_utama_tanpa_no_hp')
+                    ->label('Wali utama belum punya nomor HP')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->whereHas('siswaWali', fn (Builder $siswaWali): Builder => $siswaWali
+                        ->where('utama', true)
+                        ->whereHas('waliMurid.user', fn (Builder $user): Builder => $user->whereNull('no_hp')))),
+                Filter::make('belum_punya_wali')
+                    ->label('Belum punya wali')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->whereDoesntHave('siswaWali')),
             ])
             ->toolbarActions([
                 AksiPenempatanRombel::tempatkanBanyak(),

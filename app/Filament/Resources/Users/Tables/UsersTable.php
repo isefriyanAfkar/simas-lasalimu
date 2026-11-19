@@ -15,7 +15,7 @@ use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\TernaryFilter;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -24,8 +24,9 @@ use Illuminate\Database\Eloquent\Builder;
  * term is bound to the page URL. Looking a user up by NIK is the "Cari NIK"
  * action on ListUsers.
  *
- * Student accounts (hundreds of them, managed on the Siswa screen) are
- * hidden by default; the "Akun siswa" filter shows them.
+ * Student and parent accounts (hundreds of them, managed on the Siswa and
+ * Wali Murid screens) are hidden by default; the "Jenis akun" filter shows
+ * them. Parent accounts stay inactive: UserService refuses to activate them.
  */
 class UsersTable
 {
@@ -58,16 +59,17 @@ class UsersTable
                     ->color(fn (bool $state): string => $state ? 'success' : 'gray'),
             ])
             ->filters([
-                TernaryFilter::make('akun_siswa')
-                    ->label('Akun siswa')
+                SelectFilter::make('jenis_akun')
+                    ->label('Jenis akun')
+                    ->options(['staf' => 'Staf dan admin', 'siswa' => 'Siswa', 'wali' => 'Wali murid'])
                     ->placeholder('Semua akun')
-                    ->trueLabel('Hanya akun siswa')
-                    ->falseLabel('Tanpa akun siswa')
-                    ->default(false)
-                    ->queries(
-                        true: fn (Builder $query): Builder => $query->whereHas('siswa'),
-                        false: fn (Builder $query): Builder => $query->whereDoesntHave('siswa'),
-                    ),
+                    ->default('staf')
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'staf' => $query->whereDoesntHave('siswa')->whereDoesntHave('waliMurid'),
+                        'siswa' => $query->whereHas('siswa'),
+                        'wali' => $query->whereHas('waliMurid'),
+                        default => $query,
+                    }),
             ])
             ->recordActions([
                 EditAction::make(),

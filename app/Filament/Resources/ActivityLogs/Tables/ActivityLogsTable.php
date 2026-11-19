@@ -13,6 +13,7 @@ use App\Domains\Foundation\Models\User;
 use App\Domains\People\Models\Ptk;
 use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
+use App\Domains\People\Models\WaliMurid;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -49,7 +50,7 @@ class ActivityLogsTable
                 'causer',
                 'subject' => function (Relation $relation): void {
                     if ($relation instanceof MorphTo) {
-                        $relation->morphWith([Semester::class => ['tahunAjaran'], Rombel::class => ['tahunAjaran'], Ptk::class => ['user'], Siswa::class => ['user']]);
+                        $relation->morphWith([Semester::class => ['tahunAjaran'], Rombel::class => ['tahunAjaran'], Ptk::class => ['user'], Siswa::class => ['user'], WaliMurid::class => ['user']]);
                     }
                 },
             ]))
@@ -128,6 +129,10 @@ class ActivityLogsTable
 
         if ($subject instanceof Siswa) {
             return "{$subject->user->name} ({$subject->nis})";
+        }
+
+        if ($subject instanceof WaliMurid) {
+            return $subject->user->name;
         }
 
         if ($subject instanceof Ptk) {

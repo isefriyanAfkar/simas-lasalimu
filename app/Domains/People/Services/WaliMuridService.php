@@ -11,6 +11,7 @@ use App\Domains\People\Enums\HubunganWali;
 use App\Domains\People\Models\SiswaWali;
 use App\Domains\People\Models\WaliMurid;
 use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -70,17 +71,27 @@ class WaliMuridService
             return new Collection;
         }
 
-        $pola = '%'.self::escapeLike($kataKunci).'%';
-        $nomor = self::potonganNomor($kataKunci);
-
-        return WaliMurid::query()
+        return $this->saringPencarian(WaliMurid::query(), $kataKunci)
             ->with(['user', 'siswaWali.siswa.user'])
-            ->whereHas('user', fn ($user) => $user
-                ->where('name', 'like', $pola)
-                ->when($nomor !== null, fn ($user) => $user->orWhere('no_hp', 'like', '%'.self::escapeLike((string) $nomor).'%')))
             ->orderBy(User::query()->select('name')->whereColumn('users.id', 'wali_murid.user_id'))
             ->limit($batas)
             ->get();
+    }
+
+    /**
+     * The search of cari() as a query filter, for the Wali Murid list.
+     *
+     * @param  Builder<WaliMurid>  $query
+     * @return Builder<WaliMurid>
+     */
+    public function saringPencarian(Builder $query, string $kataKunci): Builder
+    {
+        $pola = '%'.self::escapeLike(trim($kataKunci)).'%';
+        $nomor = self::potonganNomor(trim($kataKunci));
+
+        return $query->whereHas('user', fn ($user) => $user
+            ->where('name', 'like', $pola)
+            ->when($nomor !== null, fn ($user) => $user->orWhere('no_hp', 'like', '%'.self::escapeLike((string) $nomor).'%')));
     }
 
     /**

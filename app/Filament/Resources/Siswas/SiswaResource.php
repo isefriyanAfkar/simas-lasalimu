@@ -7,6 +7,7 @@ use App\Filament\Resources\Siswas\Pages\CreateSiswa;
 use App\Filament\Resources\Siswas\Pages\EditSiswa;
 use App\Filament\Resources\Siswas\Pages\ListSiswas;
 use App\Filament\Resources\Siswas\Pages\ViewSiswa;
+use App\Filament\Resources\Siswas\RelationManagers\WaliRelationManager;
 use App\Filament\Resources\Siswas\Schemas\SiswaForm;
 use App\Filament\Resources\Siswas\Tables\SiswasTable;
 use BackedEnum;
@@ -43,6 +44,13 @@ class SiswaResource extends Resource
     public static function table(Table $table): Table
     {
         return SiswasTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            WaliRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

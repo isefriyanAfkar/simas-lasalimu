@@ -11,6 +11,7 @@ use App\Filament\Resources\Siswas\SiswaResource;
 use App\Filament\Resources\StatusKepegawaians\StatusKepegawaianResource;
 use App\Filament\Resources\TahunAjarans\TahunAjaranResource;
 use App\Filament\Resources\Users\UserResource;
+use App\Filament\Resources\WaliMurids\WaliMuridResource;
 use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
 use Filament\Pages\Dashboard;
 use Filament\Widgets\AccountWidget;
@@ -213,6 +214,7 @@ return [
             StatusKepegawaianResource::class,
             PtkResource::class,
             SiswaResource::class,
+            WaliMuridResource::class,
         ],
     ],
 

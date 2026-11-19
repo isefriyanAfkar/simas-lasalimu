@@ -618,6 +618,73 @@ class UserServiceTest extends TestCase
         ];
     }
 
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function reservedUsernames(): array
+    {
+        return [
+            'angka saja (wilayah NIS)' => ['20261001'],
+            'angka pendek' => ['1234'],
+            'wali dan angka' => ['wali00123'],
+            'wali, angka, dan akhiran' => ['wali00123-2'],
+            'wali huruf besar' => ['WALI7'],
+        ];
+    }
+
+    #[DataProvider('reservedUsernames')]
+    public function test_kelola_pengguna_refuses_a_username_reserved_for_students_or_parents(string $username): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $budi = User::factory()->create(['username' => 'budi']);
+
+        foreach ([
+            fn () => $this->service()->create($superAdmin, ['name' => 'Ani', 'username' => $username, 'email' => null, 'password' => 'Rahasia#2026!', 'peran' => null]),
+            fn () => $this->service()->update($superAdmin, $budi, ['name' => 'Budi', 'username' => $username, 'email' => null, 'peran' => null]),
+        ] as $operasi) {
+            try {
+                $operasi();
+                $this->fail("The reserved username {$username} was accepted.");
+            } catch (ValidationException $exception) {
+                $this->assertSame([UserService::PESAN_USERNAME_DICADANGKAN], $exception->errors()['username']);
+            }
+        }
+
+        $this->assertSame('budi', $budi->fresh()->username);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function freeUsernames(): array
+    {
+        return [
+            'huruf dan angka' => ['budi2026'],
+            'wali tanpa angka' => ['wali'],
+            'wali kelas' => ['walikelas'],
+            'angka di depan huruf' => ['2026budi'],
+        ];
+    }
+
+    #[DataProvider('freeUsernames')]
+    public function test_other_usernames_stay_free(string $username): void
+    {
+        $user = $this->service()->create(User::factory()->superAdmin()->create(), ['name' => 'Ani', 'username' => $username, 'email' => null, 'password' => 'Rahasia#2026!', 'peran' => null]);
+
+        $this->assertSame($username, $user->fresh()->username);
+    }
+
+    public function test_an_old_staff_account_with_a_numeric_username_may_still_be_changed_without_a_new_username(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $lama = User::factory()->create(['username' => '19800101']);
+
+        $this->service()->update($superAdmin, $lama, ['name' => 'Nama Baru', 'username' => '19800101', 'email' => null, 'peran' => null]);
+
+        $this->assertSame('Nama Baru', $lama->fresh()->name);
+        $this->assertSame('19800101', $lama->fresh()->username);
+    }
+
     private function service(): UserService
     {
         return app(UserService::class);

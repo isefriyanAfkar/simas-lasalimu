@@ -18,7 +18,9 @@ use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\StatusKepegawaian;
 use App\Domains\People\Services\PtkService;
 use App\Domains\People\Services\SiswaService;
+use App\Domains\People\Services\SiswaWaliService;
 use App\Domains\People\Services\StatusKepegawaianService;
+use App\Domains\People\Services\WaliMuridService;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\Resources\ActivityLogs\Pages\ListActivityLogs;
 use Database\Seeders\PeranDanIzinSeeder;
@@ -461,6 +463,25 @@ class ActivityLogResourceTest extends TestCase
             ->assertTableColumnStateSet('objek', 'Budi (20261001)', $log)
             ->assertTableColumnFormattedStateSet('event', 'Siswa dipindah rombel', $log)
             ->assertTableColumnStateSet('rincian', 'rombel: X-1 2026/2027 → X-2 2026/2027', $log);
+    }
+
+    public function test_parent_entries_name_the_parent_also_after_deletion(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $siswaWali = app(SiswaWaliService::class)->tambahkan($superAdmin, Siswa::factory()->create(), ['wali' => 'baru', 'hubungan' => 'wali', 'name' => 'Ahmad']);
+        $siswaWali->delete();
+        $wali = $siswaWali->waliMurid;
+        app(WaliMuridService::class)->ubahStatusMeninggal($superAdmin, $wali, true);
+        app(WaliMuridService::class)->hapus($superAdmin, $wali->fresh());
+        $meninggal = Activity::query()->where('event', 'wali_ditandai_meninggal')->sole();
+        $dihapus = Activity::query()->where('event', 'wali_dihapus')->sole();
+
+        $this->actingAs($superAdmin);
+
+        Livewire::test(ListActivityLogs::class)
+            ->assertTableColumnStateSet('objek', 'Ahmad', $meninggal)
+            ->assertTableColumnStateSet('objek', 'Ahmad', $dihapus)
+            ->assertTableColumnFormattedStateSet('event', 'Wali murid dihapus', $dihapus);
     }
 
     public function test_student_entries_name_the_student_and_the_nis(): void

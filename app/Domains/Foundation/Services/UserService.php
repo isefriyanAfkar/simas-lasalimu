@@ -141,6 +141,8 @@ class UserService
 
     public const string PESAN_PERAN_WALI = 'Akun wali hanya boleh memiliki role wali.';
 
+    public const string PESAN_USERNAME_DICADANGKAN = 'Username ini dicadangkan untuk akun siswa atau wali.';
+
     public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
     /**
@@ -905,6 +907,7 @@ class UserService
             $rules['jenis_kelamin'] = [$akunWali ? 'nullable' : 'required', Rule::enum(JenisKelamin::class)];
         } else {
             $rules['peran'] = ['present', 'nullable', 'string', Rule::in(Peran::nilaiPanel())];
+            $rules['username'][] = self::usernameTidakDicadangkan($ignore);
         }
 
         if ($ignore === null && ! $akunTanpaPanel) {
@@ -1269,6 +1272,28 @@ class UserService
         }
 
         return $username;
+    }
+
+    /**
+     * Usernames made only of digits belong to students (the NIS), and "wali"
+     * followed by digits (wali00123, wali00123-2) to parent accounts, so
+     * Kelola Pengguna may not take them. An account keeps the username it
+     * already has (an old staff account named after a number stays
+     * editable). The suffix in usernameWaliUntuk() stays as a safety net.
+     */
+    private static function usernameTidakDicadangkan(?User $ignore): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($ignore): void {
+            $username = User::normalizeUsername((string) $value);
+
+            if ($ignore !== null && $username === $ignore->getOriginal('username')) {
+                return;
+            }
+
+            if (preg_match('/^(\d+|wali\d+(-\d+)?)$/', $username) === 1) {
+                $fail(self::PESAN_USERNAME_DICADANGKAN);
+            }
+        };
     }
 
     /**
