@@ -23,7 +23,7 @@ class PelanggaranAturanAkademik extends RuntimeException
 
     public static function tahunAjaranDipakaiImport(string $nama, int $jumlahImport): self
     {
-        return new self("Tahun ajaran {$nama} sudah dipakai oleh {$jumlahImport} import siswa, jadi tidak bisa dihapus.");
+        return new self("Tahun ajaran {$nama} sudah dipakai oleh {$jumlahImport} import siswa yang tersimpan atau belum selesai, jadi tidak bisa dihapus.");
     }
 
     public static function semesterBukanMilikTahunAjaranAktif(): self

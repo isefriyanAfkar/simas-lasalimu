@@ -312,7 +312,7 @@ class TahunAjaranServiceTest extends TestCase
         $this->service()->activate($this->superAdmin(), $tahunAjaran);
 
         try {
-            $this->service()->delete($tahunAjaran->fresh());
+            $this->service()->delete($this->superAdmin(), $tahunAjaran->fresh());
             $this->fail('The active school year was deleted.');
         } catch (PelanggaranAturanAkademik $exception) {
             $this->assertSame(PelanggaranAturanAkademik::tahunAjaranAktifTidakBolehDihapus()->getMessage(), $exception->getMessage());
@@ -327,27 +327,60 @@ class TahunAjaranServiceTest extends TestCase
         $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
         $lain = $this->create('2027/2028', '2027-07-12', '2028-06-24');
 
-        $this->service()->delete($tahunAjaran);
+        $this->service()->delete($this->superAdmin(), $tahunAjaran);
 
         $this->assertNull(TahunAjaran::query()->find($tahunAjaran->id));
         $this->assertSame(0, Semester::query()->where('tahun_ajaran_id', $tahunAjaran->id)->count());
         $this->assertSame(2, $lain->semester()->count());
     }
 
-    public function test_a_school_year_used_by_a_student_import_cannot_be_deleted(): void
+    public function test_a_school_year_with_only_cancelled_or_failed_imports_is_deleted_with_them_and_logged(): void
+    {
+        $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
+        $lain = $this->create('2027/2028', '2027-07-12', '2028-06-24');
+        $superAdmin = $this->superAdmin();
+        ImportSiswa::factory()->for($tahunAjaran)->create(['status' => StatusImportSiswa::Dibatalkan, 'path' => null]);
+        ImportSiswa::factory()->for($tahunAjaran)->create(['status' => StatusImportSiswa::Gagal, 'path' => null]);
+        $importLain = ImportSiswa::factory()->for($lain)->create(['status' => StatusImportSiswa::Dibatalkan, 'path' => null]);
+
+        $this->service()->delete($superAdmin, $tahunAjaran);
+
+        $this->assertNull(TahunAjaran::query()->find($tahunAjaran->id));
+        $this->assertSame([$importLain->id], ImportSiswa::query()->pluck('id')->all());
+        $log = Activity::query()->where('event', 'import_siswa_ikut_dihapus')->sole();
+        $this->assertSame('akademik', $log->log_name);
+        $this->assertTrue($log->causer?->is($superAdmin));
+        $this->assertSame(['tahun_ajaran' => '2026/2027', 'jumlah_import' => 2, 'label' => 'TA 2026/2027'], $log->properties->all());
+    }
+
+    public function test_a_school_year_without_imports_logs_no_import_deletion(): void
+    {
+        $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
+
+        $this->service()->delete($this->superAdmin(), $tahunAjaran);
+
+        $this->assertSame(0, Activity::query()->where('event', 'import_siswa_ikut_dihapus')->count());
+    }
+
+    public function test_a_school_year_with_a_saved_or_unfinished_import_cannot_be_deleted(): void
     {
         $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
         ImportSiswa::factory()->for($tahunAjaran)->create(['status' => StatusImportSiswa::Dibatalkan, 'path' => null]);
+        $penghalang = ImportSiswa::factory()->for($tahunAjaran)->create(['status' => StatusImportSiswa::Selesai, 'path' => null]);
 
-        try {
-            $this->service()->delete($tahunAjaran);
-            $this->fail('A school year with an import was deleted.');
-        } catch (PelanggaranAturanAkademik $exception) {
-            $this->assertSame('Tahun ajaran 2026/2027 sudah dipakai oleh 1 import siswa, jadi tidak bisa dihapus.', $exception->getMessage());
+        foreach ([StatusImportSiswa::Selesai, StatusImportSiswa::Menunggu, StatusImportSiswa::Memeriksa, StatusImportSiswa::Bergalat, StatusImportSiswa::Siap, StatusImportSiswa::Menyimpan] as $status) {
+            $penghalang->update(['status' => $status]);
+
+            try {
+                $this->service()->delete($this->superAdmin(), $tahunAjaran);
+                $this->fail("A school year with a {$status->value} import was deleted.");
+            } catch (PelanggaranAturanAkademik $exception) {
+                $this->assertSame('Tahun ajaran 2026/2027 sudah dipakai oleh 1 import siswa yang tersimpan atau belum selesai, jadi tidak bisa dihapus.', $exception->getMessage());
+            }
+
+            $this->assertNotNull(TahunAjaran::query()->find($tahunAjaran->id));
+            $this->assertSame(2, ImportSiswa::query()->where('tahun_ajaran_id', $tahunAjaran->id)->count());
         }
-
-        $this->assertNotNull(TahunAjaran::query()->find($tahunAjaran->id));
-        $this->assertSame(2, $tahunAjaran->semester()->count());
     }
 
     private function service(): TahunAjaranService

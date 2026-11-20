@@ -125,7 +125,7 @@ class ActivityLogResourceTest extends TestCase
         $service->activate($superAdmin, $lama);
         $this->travelTo('2026-09-15');
         $service->activate($superAdmin, $baru);
-        $service->delete($lama->fresh());
+        $service->delete($superAdmin, $lama->fresh());
 
         $tahunAjaranLog = Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->latest('id')->first();
         $semesterLog = Activity::query()->where('event', 'semester_diaktifkan')->latest('id')->first();
@@ -196,7 +196,7 @@ class ActivityLogResourceTest extends TestCase
         $service->activate($superAdmin, $tahunAjaran);
         $service->activate($superAdmin, $lain);
         $ganjil = $tahunAjaran->semesterGanjil;
-        $service->delete($tahunAjaran->fresh());
+        $service->delete($superAdmin, $tahunAjaran->fresh());
 
         $tahunAjaranCreated = Activity::query()->where('event', 'created')->where('subject_type', $tahunAjaran->getMorphClass())->where('subject_id', $tahunAjaran->id)->sole();
         $tahunAjaranActivated = Activity::query()->where('event', 'tahun_ajaran_diaktifkan')->where('subject_id', $tahunAjaran->id)->sole();

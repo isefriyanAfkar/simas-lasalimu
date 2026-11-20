@@ -9,6 +9,7 @@ use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\RombelService;
 use App\Domains\Academic\Services\TahunAjaranService;
 use App\Domains\Foundation\Enums\Jenjang;
+use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -299,7 +300,7 @@ class RombelServiceTest extends TestCase
         $this->create(['tingkat' => 10, 'nomor' => 2]);
 
         try {
-            app(TahunAjaranService::class)->delete($this->tahunAjaran);
+            app(TahunAjaranService::class)->delete(User::factory()->superAdmin()->create(), $this->tahunAjaran);
             $this->fail('A school year with rombel was deleted.');
         } catch (PelanggaranAturanAkademik $exception) {
             $this->assertSame('Tahun ajaran 2026/2027 sudah dipakai oleh 2 rombel. Hapus rombelnya dulu.', $exception->getMessage());

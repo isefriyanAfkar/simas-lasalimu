@@ -15,6 +15,7 @@ enum AksiAkademik: string
     case SiswaDitempatkan = 'siswa_ditempatkan';
     case SiswaDipindahRombel = 'siswa_dipindah_rombel';
     case PenempatanRombelDihapus = 'penempatan_rombel_dihapus';
+    case ImportSiswaIkutDihapus = 'import_siswa_ikut_dihapus';
 
     public function label(): string
     {
@@ -26,6 +27,7 @@ enum AksiAkademik: string
             self::SiswaDitempatkan => 'Siswa ditempatkan di rombel',
             self::SiswaDipindahRombel => 'Siswa dipindah rombel',
             self::PenempatanRombelDihapus => 'Penempatan rombel dihapus',
+            self::ImportSiswaIkutDihapus => 'Import siswa yang batal atau gagal ikut dihapus bersama tahun ajaran',
         };
     }
 }

@@ -416,13 +416,26 @@ class AntreanImportSiswaTest extends TestCase
     }
 
     /**
-     * Every file in the system temporary folder.
+     * The files in the system temporary folder that the error file or the
+     * template could have made: their prefix, which tempnam() cuts to three
+     * letters on Windows ("gal", "tem"). Other programs keep writing there,
+     * so the rest is ignored.
      *
      * @return list<string>
      */
     private function fileSementara(): array
     {
-        return array_values(array_filter(array_map('realpath', glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.'*') ?: []), fn (string|false $path): bool => is_string($path) && is_file($path)));
+        $file = [];
+
+        foreach (['gal', 'tem'] as $awalan) {
+            foreach (glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.$awalan.'*') ?: [] as $path) {
+                if (is_file($path) && ($asli = realpath($path)) !== false) {
+                    $file[] = $asli;
+                }
+            }
+        }
+
+        return $file;
     }
 
     /**

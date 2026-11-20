@@ -61,12 +61,15 @@ class TahunAjaransTable
                     ->icon(Heroicon::OutlinedTrash)
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalDescription('Tahun ajaran beserta kedua semesternya akan dihapus.')
+                    ->modalDescription('Tahun ajaran beserta kedua semesternya, dan import siswa yang batal atau gagal, akan dihapus.')
                     ->visible(fn (TahunAjaran $record): bool => ! $record->status_aktif)
                     ->authorize('delete')
                     ->action(function (TahunAjaran $record): void {
                         try {
-                            app(TahunAjaranService::class)->delete($record);
+                            /** @var User $pelaku */
+                            $pelaku = Filament::auth()->user();
+
+                            app(TahunAjaranService::class)->delete($pelaku, $record);
                         } catch (PelanggaranAturanAkademik $exception) {
                             Notification::make()->danger()->title($exception->getMessage())->send();
 

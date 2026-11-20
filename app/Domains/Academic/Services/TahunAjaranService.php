@@ -7,6 +7,7 @@ use App\Domains\Academic\Enums\JenisSemester;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Models\User;
+use App\Domains\People\Enums\StatusImportSiswa;
 use App\Domains\People\Models\ImportSiswa;
 use Closure;
 use Illuminate\Support\Carbon;
@@ -120,11 +121,15 @@ class TahunAjaranService
     }
 
     /**
-     * @throws PelanggaranAturanAkademik
+     * Deletes an inactive school year without rombel, with its semesters
+     * and its cancelled or failed student imports (logged in the name of
+     * $pelaku with their number).
+     *
+     * @throws PelanggaranAturanAkademik when it is active, has rombel, or has a saved or unfinished import
      */
-    public function delete(TahunAjaran $tahunAjaran): void
+    public function delete(User $pelaku, TahunAjaran $tahunAjaran): void
     {
-        DB::transaction(function () use ($tahunAjaran): void {
+        DB::transaction(function () use ($pelaku, $tahunAjaran): void {
             $tahunAjaran = TahunAjaran::query()->lockForUpdate()->findOrFail($tahunAjaran->getKey());
 
             if ($tahunAjaran->status_aktif) {
@@ -139,12 +144,25 @@ class TahunAjaranService
                 throw PelanggaranAturanAkademik::tahunAjaranDipakaiRombel($tahunAjaran->nama, $jumlahRombel);
             }
 
-            // An import keeps its school year (restrictOnDelete), whatever
-            // its status: the import history is never deleted.
-            $jumlahImport = ImportSiswa::query()->where('tahun_ajaran_id', $tahunAjaran->getKey())->sharedLock()->count();
+            // A saved import, or one not over yet, keeps its school year
+            // (restrictOnDelete). Cancelled and failed ones changed nothing
+            // and go with it, logged with their number.
+            $import = ImportSiswa::query()->where('tahun_ajaran_id', $tahunAjaran->getKey())->lockForUpdate()->get(['id', 'status']);
+            $menghalangi = $import->reject(fn (ImportSiswa $item): bool => in_array($item->status, [StatusImportSiswa::Dibatalkan, StatusImportSiswa::Gagal], true));
 
-            if ($jumlahImport > 0) {
-                throw PelanggaranAturanAkademik::tahunAjaranDipakaiImport($tahunAjaran->nama, $jumlahImport);
+            if ($menghalangi->isNotEmpty()) {
+                throw PelanggaranAturanAkademik::tahunAjaranDipakaiImport($tahunAjaran->nama, $menghalangi->count());
+            }
+
+            if ($import->isNotEmpty()) {
+                ImportSiswa::query()->whereKey($import->modelKeys())->delete();
+
+                activity(AktivitasAkademik::LOG_NAME)
+                    ->causedBy($pelaku)
+                    ->performedOn($tahunAjaran)
+                    ->event(AksiAkademik::ImportSiswaIkutDihapus->value)
+                    ->withProperties(['tahun_ajaran' => $tahunAjaran->nama, 'jumlah_import' => $import->count()])
+                    ->log(AksiAkademik::ImportSiswaIkutDihapus->label());
             }
 
             foreach ($tahunAjaran->semester as $semester) {
