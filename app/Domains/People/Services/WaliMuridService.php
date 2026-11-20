@@ -2,7 +2,9 @@
 
 namespace App\Domains\People\Services;
 
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Services\KunciNikTidakSiap;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
@@ -39,10 +41,11 @@ use Spatie\Activitylog\Support\CauserResolver;
  * - The died flag and deleting are logged explicitly (log "kesiswaan").
  *
  * Lock order: these paths start from the parent and follow the order of
- * SiswaWaliService without its first step: W (parent row) → users (the
- * parent's account, or all user rows when the account is validated) → R
- * (siswa_wali rows). They never lock a student row, so they cannot wait on a
- * SiswaWaliService path that holds one (see the SiswaWaliService docblock).
+ * SiswaWaliService without its student steps: the identity lock wali_murid
+ * (and akun when the account is validated, KunciIdentitas), then W (parent
+ * row) → users (the parent's account) → R (siswa_wali rows). They never
+ * lock a student row, so they cannot wait on a SiswaWaliService path that
+ * holds one (see the SiswaWaliService docblock).
  */
 class WaliMuridService
 {
@@ -162,7 +165,8 @@ class WaliMuridService
     /**
      * The field errors of a new parent ($wali null) or of a change, without
      * writing: the account fields and pekerjaan. Must run inside a
-     * transaction; it locks all user rows (the users step of the lock order).
+     * transaction that already holds the identity locks it needs; it takes
+     * the akun identity lock (KunciIdentitas).
      * The NIK message names who holds the NIK only for $pelaku with the Cari
      * NIK permission, and logs it (UserService).
      *
@@ -179,7 +183,7 @@ class WaliMuridService
 
     /**
      * Change the biodata and the job. The username and the account status
-     * never change here. Lock order: W → users → R.
+     * never change here. Lock order: wali_murid → akun → W → users → R.
      *
      * @param  array<string, mixed>  $data
      *
@@ -190,6 +194,7 @@ class WaliMuridService
         $this->ensureCanManage($pelaku, $wali);
 
         return DB::transaction(function () use ($pelaku, $wali, $data): WaliMurid {
+            KunciIdentitas::kunci(JenisKunciIdentitas::WaliMurid, JenisKunciIdentitas::Akun);
             $wali = $this->lockParent($wali);
             $galat = $this->galatData($pelaku, $data, $wali);
             [$data, $galatJenisKelamin] = JenisKelaminWali::sesuaikan($wali, $data);
@@ -209,7 +214,7 @@ class WaliMuridService
 
     /**
      * Mark a parent as died, or take the mark back. A parent who is still the
-     * main contact of a student cannot be marked. Lock order: W → users → R.
+     * main contact of a student cannot be marked. Lock order: wali_murid → W → users → R.
      *
      * @throws PelanggaranAturanKesiswaan
      */
@@ -218,6 +223,7 @@ class WaliMuridService
         $this->ensureCanManage($pelaku, $wali);
 
         return DB::transaction(function () use ($pelaku, $wali, $meninggal): WaliMurid {
+            KunciIdentitas::kunci(JenisKunciIdentitas::WaliMurid);
             $wali = $this->lockParent($wali);
 
             if ($wali->meninggal === $meninggal) {
@@ -264,6 +270,7 @@ class WaliMuridService
         $this->ensureCanManage($pelaku, $wali);
 
         DB::transaction(function () use ($pelaku, $wali): void {
+            KunciIdentitas::kunci(JenisKunciIdentitas::WaliMurid, JenisKunciIdentitas::Akun);
             $wali = $this->lockParent($wali);
 
             // Locking read: sees a relation committed by a save that held

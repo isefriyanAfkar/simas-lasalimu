@@ -4,9 +4,10 @@ namespace App\Domains\People\Services;
 
 use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\PenempatanRombelService;
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\KeunikanDatabase;
-use App\Domains\Foundation\Services\KunciSekaliPerTransaksi;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\AksiKesiswaan;
@@ -138,6 +139,7 @@ class SiswaService
         $this->ensureCanManage($pelaku, $siswa);
 
         return DB::transaction(function () use ($pelaku, $siswa, $data): Siswa {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa);
             $terkunci = $this->lockStudentRow($siswa);
 
             if ($terkunci->status !== StatusSiswa::Aktif) {
@@ -197,6 +199,7 @@ class SiswaService
         $this->ensureCanManage($pelaku, $siswa);
 
         return DB::transaction(function () use ($pelaku, $siswa): Siswa {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa);
             $terkunci = $this->lockStudentRow($siswa);
 
             if ($terkunci->status === StatusSiswa::Aktif) {
@@ -346,12 +349,13 @@ class SiswaService
     }
 
     /**
-     * Must run inside a transaction, before the unique checks. Taken once
-     * per transaction (KunciSekaliPerTransaksi), see UserService::lockUsers().
+     * First in the transaction, before the unique checks: the identity
+     * locks of a student and its account (KunciIdentitas), so the NIS, NISN,
+     * username, email and NIK checks see every save that came before.
      */
     private function lockStudentRows(): void
     {
-        KunciSekaliPerTransaksi::kunci('siswa', fn () => Siswa::query()->lockForUpdate()->get(['id']));
+        KunciIdentitas::kunci(JenisKunciIdentitas::Siswa, JenisKunciIdentitas::Akun);
     }
 
     private function lockStudentRow(Siswa $siswa): Siswa

@@ -25,6 +25,7 @@ use App\Domains\People\Services\Import\TemplateImportSiswa;
 use App\Domains\People\Services\ImportSiswaService;
 use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use Database\Seeders\PeranDanIzinSeeder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -720,6 +721,69 @@ class ImportSiswaServiceTest extends TestCase
         $this->assertSame(StatusImportSiswa::Gagal, $import->fresh()?->status);
     }
 
+    public function test_an_unchanged_row_locks_no_account_in_the_check_or_the_save(): void
+    {
+        $budi = $this->siswa('Budi', '20261001', ['nisn' => '0012345678', 'tanggal_masuk' => '2026-07-13', 'asal_sekolah' => 'SMP 1'], [
+            'tempat_lahir' => 'Kendari', 'tanggal_lahir' => '2010-05-01', 'agama' => 'Islam', 'alamat' => 'Jl. Mawar', 'no_hp' => '6281234567891',
+        ]);
+        $budi->user->isiNik(self::NIK_SISWA);
+        $budi->user->save();
+        $ahmad = $this->tautkan($budi, 'Ahmad', HubunganWali::Ayah, ['no_hp' => '6281234567890'], 'Petani');
+        $ani = $this->siswa('Ani', '20261002');
+        $baris = [
+            ['nis' => '20261001', 'nama' => 'Budi', 'jenis_kelamin' => 'L', 'nisn' => '0012345678', 'nik' => self::NIK_SISWA, 'tempat_lahir' => 'Kendari',
+                'tanggal_lahir' => '01-05-2010', 'agama' => 'Islam', 'alamat' => 'Jl. Mawar', 'no_hp' => '0812-3456-7891', 'tanggal_masuk' => '13-07-2026',
+                'asal_sekolah' => 'SMP 1', 'ayah_nama' => 'Ahmad', 'ayah_no_hp' => '081234567890', 'ayah_pekerjaan' => 'Petani'],
+            ['nis' => '20261002', 'alamat' => 'Jl. Baru'],
+        ];
+
+        $import = $this->import($baris);
+        $pratinjau = $this->akunTerkunci(fn () => $this->service()->pratinjau($import));
+        $simpan = $this->akunTerkunci(fn () => $this->service()->simpan($import->fresh() ?? $import, $this->operator));
+
+        foreach ([$pratinjau, $simpan] as $terkunci) {
+            $this->assertNotContains($budi->user_id, $terkunci);
+            $this->assertNotContains($ahmad->user_id, $terkunci);
+            $this->assertContains($ani->user_id, $terkunci);
+        }
+
+        $import = ImportSiswa::query()->findOrFail($import->id);
+        $this->assertSame(StatusImportSiswa::Selesai, $import->status);
+        $this->assertSame([1, 1], [$import->ringkasan['siswa_tanpa_perubahan'], $import->ringkasan['siswa_diperbarui']]);
+        $this->assertSame('Jl. Baru', $ani->user->fresh()?->alamat);
+    }
+
+    public function test_a_row_differing_in_one_cell_still_goes_through_the_service(): void
+    {
+        foreach ([
+            'nama' => 'BUDI', 'jenis_kelamin' => 'P', 'nisn' => '0012345679', 'nik' => self::NIK_AYAH, 'tempat_lahir' => 'Baubau', 'tanggal_lahir' => '02-05-2010',
+            'agama' => 'Kristen', 'alamat' => 'Jl. Melati', 'no_hp' => '081234567899', 'tanggal_masuk' => '14-07-2026', 'asal_sekolah' => 'SMP 2',
+        ] as $kolom => $isi) {
+            $budi = $this->siswa('Budi', '20261001', ['nisn' => '0012345678', 'tanggal_masuk' => '2026-07-13', 'asal_sekolah' => 'SMP 1'], [
+                'tempat_lahir' => 'Kendari', 'tanggal_lahir' => '2010-05-01', 'agama' => 'Islam', 'alamat' => 'Jl. Mawar', 'no_hp' => '6281234567891',
+            ]);
+            $budi->user->isiNik(self::NIK_SISWA);
+            $budi->user->save();
+
+            $import = $this->import([['nis' => '20261001', $kolom => $isi]]);
+            $terkunci = $this->akunTerkunci(fn () => $this->service()->pratinjau($import));
+
+            // nisn, tanggal_masuk and asal_sekolah live on the student row,
+            // the rest on the account.
+            if (in_array($kolom, ['nisn', 'tanggal_masuk', 'asal_sekolah'], true)) {
+                $this->assertNotContains($budi->user_id, $terkunci, $kolom);
+            } else {
+                $this->assertContains($budi->user_id, $terkunci, $kolom);
+            }
+
+            $this->assertSame(1, $import->fresh()?->ringkasan['siswa_diperbarui'], $kolom);
+            $this->service()->batal($import->fresh() ?? $import, $this->operator);
+            $user = $budi->user;
+            $budi->delete();
+            $user->delete();
+        }
+    }
+
     public function test_a_nis_of_a_student_with_another_name_is_an_error(): void
     {
         $this->siswa('Budi', '20261001');
@@ -948,6 +1012,36 @@ class ImportSiswaServiceTest extends TestCase
                 ImportSiswa::query()->whereKey($import->id)->update(['status' => $status->value]);
             }
         });
+    }
+
+    /**
+     * The ids of the users rows locked while $aksi runs: by a locking read
+     * of one row, or by writing it (an UPDATE holds the row until the end of
+     * the transaction).
+     *
+     * @return list<int>
+     */
+    private function akunTerkunci(\Closure $aksi): array
+    {
+        $terkunci = [];
+        $merekam = true;
+
+        DB::listen(function (QueryExecuted $query) use (&$terkunci, &$merekam): void {
+            if (! $merekam) {
+                return;
+            }
+
+            if (preg_match('/^select .* from `users` where .*for update$/', $query->sql) === 1) {
+                $terkunci[] = (int) $query->bindings[0];
+            } elseif (preg_match('/^(update|delete from) `users` .* where `id` = \?$/', $query->sql) === 1) {
+                $terkunci[] = (int) end($query->bindings);
+            }
+        });
+
+        $aksi();
+        $merekam = false;
+
+        return $terkunci;
     }
 
     private function service(): ImportSiswaService

@@ -42,22 +42,38 @@ CLAUDE.md.
 - Semua jalur yang mengunci beberapa tabel yang sama memakai satu urutan
   kunci. Jalur yang berangkat dari tengah urutan melanjutkan dari situ dan
   tidak pernah kembali ke langkah sebelumnya.
-  - Contoh siswa dan wali: S (siswa) → W (wali_murid) → users → R
-    (siswa_wali).
-  - Jalur yang berangkat dari wali memakai W → users → R; Kelola Pengguna
-    memakai users → R.
+  - Urutan seluruh aplikasi: kunci identitas siswa → wali_murid → akun
+    (`App\Domains\Foundation\Services\KunciIdentitas`), lalu S (baris siswa)
+    → W (baris wali_murid) → baris users → R (baris siswa_wali).
+  - Kunci identitas selalu diambil paling awal di transaksi, sebelum baris
+    data mana pun, lewat satu panggilan `KunciIdentitas::kunci(...)` yang
+    mengurutkannya sendiri.
+  - Jalur yang berangkat dari wali memakai wali_murid (→ akun) → W → users
+    → R; Kelola Pengguna memakai akun → users → R.
   - Alasannya: dua transaksi yang mengunci dua baris dengan urutan
     berlawanan bisa saling menunggu (*deadlock*). Dengan satu urutan,
     siklus seperti itu tidak bisa terbentuk.
   - Mengunci ulang baris yang sudah dipegang transaksi itu sendiri
-    diperbolehkan, karena tidak menambah kunci baru. Mengunci *semua* baris
-    sebuah tabel (misalnya `UserService::lockUsers()` saat akun divalidasi)
-    tetap kunci baru walaupun satu barisnya sudah dipegang, jadi harus
-    terjadi di langkahnya sendiri.
+    diperbolehkan, karena tidak menambah kunci baru.
+  - Jangan pernah mengunci seluruh tabel `users`, `siswa`, atau
+    `wali_murid`. Keunikan identitas dijaga kunci identitas, sehingga masuk,
+    keluar, `remember_token`, dan perubahan status atau kata sandi tidak
+    pernah menunggu import.
   - Tulis urutannya di docblock setiap Service yang memakainya. Contoh:
     `SiswaWaliService` dan `WaliMuridService`.
   - Test-nya memeriksa urutan pembacaan berkunci di SQL; lihat
-    `tests/Feature/Domains/People/Services/UrutanKunciWaliTest.php`.
+    `tests/Feature/Domains/People/Services/UrutanKunciWaliTest.php` dan
+    `UrutanKunciIdentitasTest.php`.
+- **Batas kunci siswa.** Kunci identitas siswa hanya diambil oleh penulisan
+  data identitas dan keanggotaan siswa: tabel `siswa`, `wali_murid`,
+  `siswa_wali`, `penempatan_rombel`, dan akun siswa atau wali.
+  - Modul yang menulis data *tentang* siswa di tabel lain (presensi,
+    jurnal, e-poin, perpustakaan, permohonan) **dilarang** mengambil kunci
+    identitas mana pun. Kalau mengambilnya, setiap simpan presensi akan
+    menunggu setiap import dan setiap perubahan data siswa.
+  - Kalau modul seperti itu perlu membaca keanggotaan siswa (siapa saja di
+    sebuah rombel), cukup lewat `App\Domains\Academic\Services\RombelSiswa`,
+    tanpa kunci identitas.
 - *Deadlock* yang tetap bisa terjadi (misalnya *gap lock* saat dua siswa
   mendapat wali pertamanya bersamaan) diterima dan ditangani dua lapis:
   - transaksi Service memakai `attempts`, sehingga Laravel mencobanya ulang;
@@ -70,7 +86,8 @@ CLAUDE.md.
     siswa) tetap menangkapnya per baris dan melanjutkan baris berikutnya.
 - Field unik (kode, nama, username, email) dijaga dua lapis:
   - validasi `unique` dijalankan di dalam `DB::transaction(..., attempts)`
-    setelah baris tabelnya dikunci dengan `lockForUpdate`, jadi dua
+    setelah baris tabelnya dikunci dengan `lockForUpdate` (untuk identitas
+    akun, siswa, dan wali: setelah kunci identitasnya diambil), jadi dua
     penyimpanan bersamaan berjalan bergiliran;
   - seluruh operasi dibungkus
     `App\Domains\Foundation\Services\KeunikanDatabase::jaga()`, yang

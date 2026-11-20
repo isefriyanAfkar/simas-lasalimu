@@ -5,6 +5,7 @@ namespace App\Domains\Foundation\Services;
 use App\Domains\Foundation\Enums\Agama;
 use App\Domains\Foundation\Enums\AksiPengguna;
 use App\Domains\Foundation\Enums\JenisKelamin;
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
 use App\Domains\People\Services\JenisKelaminWali;
@@ -52,10 +53,12 @@ use Spatie\Activitylog\Models\Activity;
  *   an account, and only a parent account without any other record
  *
  * create() and update() validate their input here (see validateAccountData),
- * whatever the caller already checked. Every save that checks username or
- * email uniqueness does so inside a transaction that first locks the user
- * rows, and KeunikanDatabase turns a unique index violation that still
- * happens into a field error.
+ * whatever the caller already checked. Every save that checks username,
+ * email, NIK or photo uniqueness does so inside a transaction that first
+ * takes the akun identity lock (KunciIdentitas, never the users rows, so
+ * logging in and the remember_token never wait on it), and
+ * KeunikanDatabase turns a unique index violation that still happens into
+ * a field error. Status, password and role changes take no identity lock.
  *
  * Biodata rules (all fields optional):
  * - nik is exactly 16 digits and unique; it is stored encrypted (APP_KEY)
@@ -98,9 +101,9 @@ class UserService
     private const string LOG_NAME = 'pengguna';
 
     /**
-     * Saves that check username/email uniqueness lock the user rows first;
-     * two such saves can deadlock on the gap lock, and the retry then sees
-     * the other row and fails validation.
+     * Saves that check username/email uniqueness take the akun identity lock
+     * first; a deadlock on an index gap that still happens is retried, and
+     * the retry then sees the other row and fails validation.
      */
     private const int ATTEMPTS = 3;
 
@@ -1501,15 +1504,15 @@ class UserService
     }
 
     /**
-     * Must run inside a transaction, before a username/email unique check,
-     * so two concurrent saves are serialized instead of both passing it.
-     * Taken once per transaction (KunciSekaliPerTransaksi): an import saves
-     * many accounts in one transaction and would otherwise scan the growing
-     * table again for each.
+     * Must run inside a transaction, before the username, email, NIK and
+     * photo checks, so two concurrent account saves are serialized instead
+     * of both passing them: the akun identity lock (KunciIdentitas), never
+     * the users rows. A caller that also takes the siswa or wali_murid lock
+     * takes it before this, at the start of its transaction.
      */
     private function lockUsers(): void
     {
-        KunciSekaliPerTransaksi::kunci('users', fn () => User::query()->lockForUpdate()->get(['id']));
+        KunciIdentitas::kunci(JenisKunciIdentitas::Akun);
     }
 
     /**

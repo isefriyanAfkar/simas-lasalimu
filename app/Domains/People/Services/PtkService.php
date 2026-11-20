@@ -2,8 +2,10 @@
 
 namespace App\Domains\People\Services;
 
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\KeunikanDatabase;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\AksiKepegawaian;
@@ -426,10 +428,13 @@ class PtkService
     }
 
     /**
-     * Must run inside a transaction, before the unique checks.
+     * Must run first in the transaction, before the unique checks: the akun
+     * identity lock (KunciIdentitas) before any row, then the staff rows for
+     * NIP, NUPTK and kode.
      */
     private function lockStaffRows(): void
     {
+        KunciIdentitas::kunci(JenisKunciIdentitas::Akun);
         Ptk::query()->lockForUpdate()->get(['id']);
     }
 

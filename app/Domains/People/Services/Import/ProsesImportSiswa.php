@@ -7,9 +7,10 @@ use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\PenempatanRombelService;
 use App\Domains\Academic\Services\RombelSiswa;
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Services\KunciNikTidakSiap;
-use App\Domains\Foundation\Services\KunciSekaliPerTransaksi;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\HubunganWali;
@@ -38,11 +39,12 @@ use Spatie\Activitylog\Models\Activity;
  * entries.
  *
  * Before any row:
- * - all rows of siswa, wali_murid and users are locked, in the lock order
- *   S → W → users of SiswaWaliService; every later lock of those tables is
- *   a row the transaction already holds. The keys "siswa" and "users" are
- *   the ones SiswaService and UserService use with KunciSekaliPerTransaksi,
- *   so they skip their own scans;
+ * - the identity locks siswa → wali_murid → akun (KunciIdentitas) are
+ *   taken, before any data row: every other write of student identity and
+ *   membership waits for the import, so the rows below can be locked in
+ *   any order without a deadlock, and nothing the check reads changes
+ *   under it. Logging in and the remember_token never wait, except for
+ *   the accounts this import changes;
  * - a row with a cell that could not be read is not applied;
  * - a NIS that appears in more than one row is an error on each of them;
  * - one person (the same NIK, or the same name and phone number) whose
@@ -191,13 +193,14 @@ final class ProsesImportSiswa
     }
 
     /**
-     * Steps S, W and users of the lock order, each over the whole table.
+     * The three identity locks (KunciIdentitas), held until the caller's
+     * transaction ends: no other write of a student, a parent, their
+     * links, a placement or an account identity runs meanwhile, while the
+     * data tables stay unlocked except the rows this import changes.
      */
     private function kunciSemua(): void
     {
-        KunciSekaliPerTransaksi::kunci('siswa', fn () => Siswa::query()->lockForUpdate()->get(['id']));
-        KunciSekaliPerTransaksi::kunci('wali_murid', fn () => WaliMurid::query()->lockForUpdate()->get(['id']));
-        KunciSekaliPerTransaksi::kunci('users', fn () => User::query()->lockForUpdate()->get(['id']));
+        KunciIdentitas::kunci(JenisKunciIdentitas::Siswa, JenisKunciIdentitas::WaliMurid, JenisKunciIdentitas::Akun);
     }
 
     /**

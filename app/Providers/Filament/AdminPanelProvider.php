@@ -66,8 +66,9 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
-            // While an import is checked or saved, saving accounts, students
-            // and parents waits for it: every page says so.
+            // While an import is checked or saved, writes of students,
+            // parents and account identities wait for it (KunciIdentitas):
+            // every page says so.
             ->renderHook(PanelsRenderHook::CONTENT_START, fn (): View|string => app(ImportSiswaService::class)->sedangMemproses() ? view('filament.banner-import-berjalan') : '')
             ->plugins([
                 FilamentShieldPlugin::make(),

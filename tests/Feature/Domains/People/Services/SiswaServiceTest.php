@@ -446,17 +446,26 @@ class SiswaServiceTest extends TestCase
     }
 
     /**
-     * An import saves many students in one transaction: the whole-table locks
-     * (all users, all students) are taken once, not once per student.
+     * An import saves many students in one transaction: no save locks a
+     * whole table; each takes only the siswa and akun identity rows
+     * (KunciIdentitas), one primary key lookup each, whatever the number of
+     * students.
      */
-    public function test_many_saves_in_one_transaction_lock_the_whole_tables_once(): void
+    public function test_many_saves_in_one_transaction_lock_only_the_identity_rows(): void
     {
         $operator = User::factory()->operator()->create();
         $kunciSemua = [];
+        $kunciIdentitas = [];
         $merekam = true;
-        DB::listen(function (QueryExecuted $query) use (&$kunciSemua, &$merekam): void {
-            if ($merekam && preg_match('/^select `id` from `(users|siswa)` for update$/', $query->sql, $cocok) === 1) {
+        DB::listen(function (QueryExecuted $query) use (&$kunciSemua, &$kunciIdentitas, &$merekam): void {
+            if (! $merekam) {
+                return;
+            }
+
+            if (preg_match('/^select `id` from `(users|siswa)` for update$/', $query->sql, $cocok) === 1) {
                 $kunciSemua[] = $cocok[1];
+            } elseif (str_contains($query->sql, '`kunci_identitas`') && str_ends_with($query->sql, 'for update')) {
+                $kunciIdentitas[] = (string) $query->bindings[0];
             }
         });
 
@@ -467,7 +476,8 @@ class SiswaServiceTest extends TestCase
         });
         $merekam = false;
 
-        $this->assertSame(['siswa', 'users'], $kunciSemua);
+        $this->assertSame([], $kunciSemua);
+        $this->assertSame(['siswa', 'akun'], array_values(array_unique($kunciIdentitas)));
         $this->assertSame(3, Siswa::query()->count());
     }
 

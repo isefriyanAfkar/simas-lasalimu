@@ -6,7 +6,9 @@ use App\Domains\Academic\Enums\AksiAkademik;
 use App\Domains\Academic\Models\PenempatanRombel;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\StatusSiswa;
@@ -68,6 +70,7 @@ class PenempatanRombelService
         $this->ensureCanManage($pelaku, $siswa);
 
         return DB::transaction(function () use ($pelaku, $siswa, $rombel): PenempatanRombel {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa);
             $siswa = $this->lockStudent($siswa);
             $rombel = $this->lockRombel($rombel);
             $siswa->load('user');
@@ -106,6 +109,7 @@ class PenempatanRombelService
         $this->ensureCanManage($pelaku, $siswa);
 
         return DB::transaction(function () use ($pelaku, $siswa, $rombel): PenempatanRombel {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa);
             $siswa = $this->lockStudent($siswa);
             $rombel = $this->lockRombel($rombel);
             $siswa->load('user');
@@ -181,6 +185,7 @@ class PenempatanRombelService
         $this->ensureCanManage($pelaku, $penempatan->siswa);
 
         DB::transaction(function () use ($pelaku, $penempatan): void {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa);
             $siswa = $this->lockStudent($penempatan->siswa);
             $penempatan = PenempatanRombel::query()->with('rombel.tahunAjaran')->lockForUpdate()->findOrFail($penempatan->getKey());
 

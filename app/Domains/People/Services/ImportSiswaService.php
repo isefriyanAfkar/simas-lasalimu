@@ -61,8 +61,6 @@ use Throwable;
  * - UserService registers a Cari NIK log entry after a rollback or commit
  *   only when it names a NIK holder, which it never does here; it deletes a
  *   replaced photo after a commit, and the import never sends a photo;
- * - the lock marks (KunciSekaliPerTransaksi) are memory and follow the
- *   rollback;
  * - a rolled-back check still uses up AUTO_INCREMENT values (gaps in ids),
  *   and may warm the permission cache with what the database already holds.
  * The services fire no other events, jobs or file writes.
@@ -547,7 +545,7 @@ class ImportSiswaService
 
     /**
      * Whether an import is being checked or saved now, which holds the
-     * student, parent and account tables until it ends.
+     * identity locks (KunciIdentitas) until it ends.
      */
     public function sedangMemproses(): bool
     {

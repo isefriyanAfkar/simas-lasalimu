@@ -231,19 +231,26 @@ data siswa yang setengah tersimpan, dan import yang ditandai gagal memang
 tidak menyimpan apa pun.
 
 **f. Jalankan import di luar jam sibuk.** Selama satu import diperiksa atau
-disimpan, penyimpanan data siswa, wali murid, dan akun pengguna di layar lain
-menunggu sampai import selesai. Ini termasuk masuk dan keluar dengan "Ingat
-saya". Di laptop pengembang, 500 baris butuh sekitar 50 detik untuk
-pemeriksaan dan 50 detik untuk simpan; di server bersama bisa lebih lama.
-Selama itu setiap halaman panel menampilkan peringatan "Import siswa sedang
+disimpan, yang menunggu sampai import selesai adalah:
+
+- penyimpanan data siswa, wali murid, hubungan wali, dan penempatan rombel;
+- perubahan username, email, NIK, atau foto akun mana pun;
+- masuk dan keluar untuk akun siswa atau wali yang **diubah** oleh import
+  itu (barisnya di file berbeda dari data di sistem).
+
+Masuk dan keluar akun lain, termasuk dengan "Ingat saya", serta
+mengaktifkan, menonaktifkan, dan mengatur ulang kata sandi, tidak menunggu.
+Di laptop pengembang, 500 baris butuh sekitar 50 detik untuk pemeriksaan
+dan 50 detik untuk simpan; di server bersama bisa lebih lama. Selama itu
+setiap halaman panel menampilkan peringatan "Import siswa sedang
 diproses". Karena itu:
 
 - unggah dan simpan import di luar jam kerja tata usaha, misalnya sore atau
   malam;
 - bagi data besar menjadi beberapa file, misalnya per tingkat, dan jalankan
   satu per satu;
-- kalau ada yang melaporkan "Coba lagi" saat menyimpan akun, tunggu sampai
-  peringatan di atas halaman hilang.
+- kalau ada yang melaporkan "Coba lagi" saat menyimpan data siswa atau akun,
+  tunggu sampai peringatan di atas halaman hilang.
 
 ### 8. Periksa sebelum situs dibuka
 

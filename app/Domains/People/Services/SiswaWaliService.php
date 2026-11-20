@@ -3,8 +3,10 @@
 namespace App\Domains\People\Services;
 
 use App\Domains\Foundation\Enums\JenisKelamin;
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\KeunikanDatabase;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\AksiKesiswaan;
@@ -38,14 +40,15 @@ use Illuminate\Validation\ValidationException;
  * account (wali "baru", see WaliMuridService). Every change is logged
  * explicitly (log "kesiswaan", subject the student), without the NIK.
  *
- * Lock order, the same in every path that touches siswa_wali:
- * S (student row) → W (parent row) → users (the parent's account, or all
- * user rows when an account is validated) → R (siswa_wali rows).
+ * Lock order, the same in every path that touches siswa_wali (see
+ * KunciIdentitas): the identity locks siswa → wali_murid (→ akun when an
+ * account is created), taken first, then S (student row) → W (parent row)
+ * → users (the parent's account) → R (siswa_wali rows).
  * WaliMuridService and Kelola Pengguna start further along the same order
- * (W → users → R, or users → R) and never go back to an earlier step, so no
- * two paths can wait on each other in a cycle. Locking a row again that the
- * transaction already holds (users while saving the account) takes no new
- * lock. A deadlock that still happens (for example on index gaps while two
+ * (wali_murid → W → users → R, or akun → users → R) and never go back to an
+ * earlier step, so no two paths can wait on each other in a cycle. Locking
+ * a row again that the transaction already holds takes no new lock. A
+ * deadlock that still happens (for example on index gaps while two
  * students get their first parent) is retried (ATTEMPTS); one that remains
  * after the retries becomes a "coba lagi" notification (GalatKonkurensi).
  */
@@ -70,8 +73,8 @@ class SiswaWaliService
     ) {}
 
     /**
-     * Lock order: S → W and the parent's account (existing parent) or all
-     * user rows (new parent) → R.
+     * Lock order: the identity locks siswa → wali_murid → akun, then S → W
+     * and the parent's account (existing parent) → R.
      *
      * @param  array<string, mixed>  $data  wali ("baru" or "ada"), wali_murid_id, hubungan, and for a new parent the account fields and pekerjaan
      *
@@ -82,6 +85,7 @@ class SiswaWaliService
         $this->ensureCanManage($pelaku, $siswa->user);
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): SiswaWali => DB::transaction(function () use ($pelaku, $siswa, $data): SiswaWali {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa, JenisKunciIdentitas::WaliMurid, JenisKunciIdentitas::Akun);
             $siswa = $this->lockStudent($siswa);
             $galat = [];
             $mode = $data['wali'] ?? null;
@@ -172,6 +176,7 @@ class SiswaWaliService
         $this->ensureCanManage($pelaku, $siswaWali->siswa->user);
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): SiswaWali => DB::transaction(function () use ($pelaku, $siswaWali, $data): SiswaWali {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa, JenisKunciIdentitas::WaliMurid);
             $siswa = $this->lockStudent($siswaWali->siswa);
             $wali = $this->lockParent($siswaWali->wali_murid_id);
             $siswaWali = $this->lockRelation($siswaWali);
@@ -216,6 +221,7 @@ class SiswaWaliService
         $this->ensureCanManage($pelaku, $siswaWali->siswa->user);
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): SiswaWali => DB::transaction(function () use ($pelaku, $siswaWali): SiswaWali {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa, JenisKunciIdentitas::WaliMurid);
             $siswa = $this->lockStudent($siswaWali->siswa);
             $wali = $this->lockParent($siswaWali->wali_murid_id);
             $siswaWali = $this->lockRelation($siswaWali);
@@ -259,6 +265,7 @@ class SiswaWaliService
         $this->ensureCanManage($pelaku, $siswaWali->siswa->user);
 
         DB::transaction(function () use ($pelaku, $siswaWali): void {
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa, JenisKunciIdentitas::WaliMurid);
             $siswa = $this->lockStudent($siswaWali->siswa);
             $wali = $this->lockParent($siswaWali->wali_murid_id);
             $siswaWali = $this->lockRelation($siswaWali);

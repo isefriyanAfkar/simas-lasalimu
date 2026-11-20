@@ -205,7 +205,7 @@ class ImportSiswaResourceTest extends TestCase
 
     public function test_every_panel_page_warns_while_an_import_is_checked_or_saved(): void
     {
-        $peringatan = ['Import siswa sedang diproses.', 'Penyimpanan data siswa, wali murid, dan akun pengguna, termasuk masuk dengan "Ingat saya", bisa tertunda sampai import selesai.'];
+        $peringatan = ['Import siswa sedang diproses.', 'Penyimpanan data siswa dan wali murid, serta perubahan username, email, NIK, atau foto akun, bisa tertunda sampai import selesai. Masuk dan keluar tidak terpengaruh.'];
         $import = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Siap]);
         $admin = User::factory()->superAdmin()->create();
         $this->actingAs($admin);
