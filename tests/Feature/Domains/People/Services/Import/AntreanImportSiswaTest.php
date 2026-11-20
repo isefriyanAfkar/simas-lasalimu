@@ -13,6 +13,7 @@ use App\Domains\People\Services\Import\BacaFileImportSiswa;
 use App\Domains\People\Services\Import\KolomImportSiswa;
 use App\Domains\People\Services\Import\PeriksaImportSiswa;
 use App\Domains\People\Services\Import\SimpanImportSiswa;
+use App\Domains\People\Services\Import\TemplateImportSiswa;
 use App\Domains\People\Services\ImportSiswaService;
 use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use Database\Seeders\PeranDanIzinSeeder;
@@ -25,6 +26,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use RuntimeException;
+use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
 
 /**
@@ -88,7 +90,7 @@ class AntreanImportSiswaTest extends TestCase
         $lain = TahunAjaran::factory()->create(['nama' => '2027/2028', 'tanggal_mulai' => '2027-07-12', 'tanggal_selesai' => '2028-06-24']);
         $this->service()->mulai($this->operator, $lain, $this->fileImport($lain, [$this->baris()]), 'lain.xlsx');
 
-        $this->service()->batal($pertama);
+        $this->service()->batal($pertama, $this->operator);
         $kedua = $this->mulai(nama: 'kedua.xlsx');
 
         $this->assertSame(StatusImportSiswa::Menunggu, $kedua->status);
@@ -115,26 +117,26 @@ class AntreanImportSiswaTest extends TestCase
         Queue::fake();
         $import = $this->service()->pratinjau($this->mulai());
 
-        $import = $this->service()->antrekanSimpan($import);
+        $import = $this->service()->antrekanSimpan($import, $this->operator);
 
         $this->assertSame(StatusImportSiswa::Menyimpan, $import->status);
         Queue::assertPushed(SimpanImportSiswa::class, 1);
 
         try {
-            $this->service()->antrekanSimpan($import);
+            $this->service()->antrekanSimpan($import, $this->operator);
             $this->fail('Disimpan dua kali.');
         } catch (PelanggaranAturanKesiswaan $exception) {
             $this->assertSame('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.', $exception->getMessage());
         }
 
-        app()->call([new SimpanImportSiswa($import->id), 'handle']);
+        app()->call([new SimpanImportSiswa($import->id, $this->operator->id), 'handle']);
 
         $this->assertSame(StatusImportSiswa::Selesai, $import->fresh()?->status);
 
         $bergalat = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Bergalat]);
 
         try {
-            $this->service()->antrekanSimpan($bergalat);
+            $this->service()->antrekanSimpan($bergalat, $this->operator);
             $this->fail('Import bergalat diantrekan.');
         } catch (PelanggaranAturanKesiswaan) {
             $this->assertSame(StatusImportSiswa::Bergalat, $bergalat->fresh()?->status);
@@ -145,7 +147,7 @@ class AntreanImportSiswaTest extends TestCase
 
     public function test_the_jobs_run_once_with_a_timeout_below_the_queue_retry_after(): void
     {
-        foreach ([new PeriksaImportSiswa(1), new SimpanImportSiswa(1)] as $job) {
+        foreach ([new PeriksaImportSiswa(1), new SimpanImportSiswa(1, $this->operator->id)] as $job) {
             $this->assertSame(1, $job->tries);
             $this->assertSame(ImportSiswaService::BATAS_WAKTU_JOB, $job->timeout);
             $this->assertTrue($job->failOnTimeout);
@@ -171,11 +173,11 @@ class AntreanImportSiswaTest extends TestCase
 
         $disimpan = $this->mulai();
         $disimpan->update(['status' => StatusImportSiswa::Menyimpan]);
-        (new SimpanImportSiswa($disimpan->id))->failed(null);
+        (new SimpanImportSiswa($disimpan->id, $this->operator->id))->failed(null);
         $this->assertSame(ImportSiswaService::PESAN_SIMPAN_GAGAL, $disimpan->fresh()?->pesan);
 
         $selesai = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Selesai, 'path' => null]);
-        (new SimpanImportSiswa($selesai->id))->failed(null);
+        (new SimpanImportSiswa($selesai->id, $this->operator->id))->failed(null);
         $this->assertSame(StatusImportSiswa::Selesai, $selesai->fresh()?->status);
     }
 
@@ -259,7 +261,7 @@ class AntreanImportSiswaTest extends TestCase
         ]));
         $this->assertSame(StatusImportSiswa::Bergalat, $import->status);
 
-        $path = $this->service()->fileGalat($import);
+        $path = $this->service()->fileGalat($import, $this->operator);
         $this->assertNotNull($path);
         $spreadsheet = IOFactory::load($path);
         $sheet = $spreadsheet->getSheetByName(KolomImportSiswa::LEMBAR_DATA);
@@ -277,6 +279,150 @@ class AntreanImportSiswaTest extends TestCase
         $baca = app(BacaFileImportSiswa::class)->baca($path, $this->tahunAjaran);
         $this->assertSame([], $baca->galatFile);
         $this->assertCount(3, $baca->baris);
+    }
+
+    public function test_the_save_is_made_in_the_name_of_whoever_pressed_simpan(): void
+    {
+        Queue::fake();
+        $import = $this->service()->pratinjau($this->mulai());
+        $lain = User::factory()->operator()->create();
+        $logSebelum = (int) Activity::query()->max('id');
+
+        $this->service()->antrekanSimpan($import, $lain);
+        Queue::assertPushed(SimpanImportSiswa::class, fn (SimpanImportSiswa $job): bool => $job->pelakuId === $lain->id);
+        app()->call([new SimpanImportSiswa($import->id, $lain->id), 'handle']);
+
+        $this->assertSame(StatusImportSiswa::Selesai, $import->fresh()?->status);
+        $log = Activity::query()->where('id', '>', $logSebelum)->get();
+        $this->assertTrue($log->firstWhere('event', 'import_siswa')?->causer?->is($lain));
+        $this->assertSame([$lain->id], $log->pluck('causer_id')->unique()->values()->all());
+    }
+
+    public function test_cancelling_is_logged_with_whoever_pressed_it(): void
+    {
+        Queue::fake();
+        $import = $this->mulai();
+        $lain = User::factory()->operator()->create();
+
+        $this->service()->batal($import, $lain);
+
+        $log = Activity::query()->where('event', 'import_siswa_dibatalkan')->sole();
+        $this->assertSame('kesiswaan', $log->log_name);
+        $this->assertTrue($log->causer?->is($lain));
+        $this->assertTrue($log->subject?->is($import));
+        $this->assertSame(['nama_file' => 'siswa.xlsx', 'tahun_ajaran' => '2026/2027'], $log->properties->all());
+    }
+
+    public function test_each_error_file_download_is_logged_without_its_content(): void
+    {
+        Queue::fake();
+        $guru = Ptk::factory()->for(User::factory()->state(['name' => 'Hafida']))->create();
+        $guru->user->isiNik(self::NIK_GURU);
+        $guru->user->save();
+        $lain = User::factory()->operator()->create();
+        $bersih = $this->service()->pratinjau($this->mulai());
+        $this->assertNull($this->service()->fileGalat($bersih, $lain));
+        $this->service()->batal($bersih, $lain);
+        $import = $this->service()->pratinjau($this->mulai([$this->baris(['nik' => self::NIK_GURU])]));
+
+        foreach ([$this->operator, $lain] as $pelaku) {
+            $path = $this->service()->fileGalat($import, $pelaku);
+            $this->assertNotNull($path);
+            unlink($path);
+        }
+
+        $log = Activity::query()->where('event', 'file_galat_import_diunduh')->orderBy('id')->get();
+        $this->assertSame([$this->operator->id, $lain->id], $log->pluck('causer_id')->all());
+        $this->assertTrue($log[0]->subject?->is($import));
+        $this->assertSame(['nama_file' => 'siswa.xlsx', 'tahun_ajaran' => '2026/2027'], $log[0]->properties->all());
+        $this->assertStringNotContainsString(self::NIK_GURU, (string) $log->toJson());
+    }
+
+    public function test_a_file_used_by_another_import_is_refused_and_kept(): void
+    {
+        Queue::fake();
+        $pertama = $this->mulai();
+        $lain = TahunAjaran::factory()->create(['nama' => '2027/2028', 'tanggal_mulai' => '2027-07-12', 'tanggal_selesai' => '2028-06-24']);
+
+        foreach ([$lain, $this->tahunAjaran] as $tahunAjaran) {
+            try {
+                $this->service()->mulai($this->operator, $tahunAjaran, (string) $pertama->path, 'curian.xlsx');
+                $this->fail("Path import lain diterima untuk {$tahunAjaran->nama}.");
+            } catch (ValidationException $exception) {
+                $this->assertSame(['file' => ['File import tidak ditemukan. Unggah ulang file .xlsx.']], $exception->errors());
+            }
+
+            $this->assertTrue(Storage::disk('local')->exists((string) $pertama->path));
+        }
+
+        $this->assertSame(1, ImportSiswa::query()->count());
+    }
+
+    public function test_the_error_file_and_the_template_leave_no_other_temporary_file(): void
+    {
+        Queue::fake();
+        $import = $this->service()->pratinjau($this->mulai([$this->baris(['jenis_kelamin' => null])]));
+        $sebelum = $this->fileSementara();
+
+        $galat = $this->service()->fileGalat($import, $this->operator);
+        $template = app(TemplateImportSiswa::class)->fileSementara($this->tahunAjaran);
+
+        $this->assertNotNull($galat);
+        $this->assertSame([], app(BacaFileImportSiswa::class)->baca($template, $this->tahunAjaran)->galatFile);
+        $this->assertEqualsCanonicalizing([...$sebelum, realpath($galat), realpath($template)], $this->fileSementara());
+        unlink($galat);
+        unlink($template);
+        $this->assertEqualsCanonicalizing($sebelum, $this->fileSementara());
+    }
+
+    public function test_a_job_for_an_import_that_is_already_over_does_nothing(): void
+    {
+        Queue::fake();
+        $import = $this->service()->pratinjau($this->mulai());
+        $this->service()->batal($import, $this->operator);
+
+        app()->call([new PeriksaImportSiswa($import->id), 'handle']);
+        app()->call([new SimpanImportSiswa($import->id, $this->operator->id), 'handle']);
+
+        $this->assertSame(StatusImportSiswa::Dibatalkan, $import->fresh()?->status);
+    }
+
+    public function test_the_cleanup_never_ends_an_import_that_moved_on_meanwhile(): void
+    {
+        Queue::fake();
+        $macet = $this->importDengan(StatusImportSiswa::Memeriksa, ['diproses_sejak' => now()->subSeconds(ImportSiswaService::BATAS_MACET_DETIK + 60)]);
+        $terlantar = $this->importDengan(StatusImportSiswa::Siap, ['updated_at' => now()->subHours(25)]);
+        $berpindah = [];
+
+        // Right after the cleanup found them: the stuck check ends, and an
+        // operator presses Simpan on the abandoned one.
+        ImportSiswa::retrieved(function (ImportSiswa $dibaca) use ($macet, $terlantar, &$berpindah): void {
+            foreach ([[$macet, StatusImportSiswa::Siap], [$terlantar, StatusImportSiswa::Menyimpan]] as [$import, $status]) {
+                if (! isset($berpindah[$import->id]) && $dibaca->is($import)) {
+                    $berpindah[$import->id] = true;
+                    ImportSiswa::query()->whereKey($import->id)->update(['status' => $status->value, 'diproses_sejak' => null]);
+                }
+            }
+        });
+
+        $hasil = $this->service()->bersihkan();
+
+        $this->assertCount(2, $berpindah);
+        $this->assertSame([0, 0], [$hasil['macet'], $hasil['terlantar']]);
+        $this->assertSame(StatusImportSiswa::Siap, $macet->fresh()?->status);
+        $this->assertSame(StatusImportSiswa::Menyimpan, $terlantar->fresh()?->status);
+        $this->assertTrue(Storage::disk('local')->exists((string) $macet->path));
+        $this->assertTrue(Storage::disk('local')->exists((string) $terlantar->path));
+    }
+
+    /**
+     * Every file in the system temporary folder.
+     *
+     * @return list<string>
+     */
+    private function fileSementara(): array
+    {
+        return array_values(array_filter(array_map('realpath', glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.'*') ?: []), fn (string|false $path): bool => is_string($path) && is_file($path)));
     }
 
     /**

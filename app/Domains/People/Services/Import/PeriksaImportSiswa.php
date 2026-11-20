@@ -4,6 +4,7 @@ namespace App\Domains\People\Services\Import;
 
 use App\Domains\People\Models\ImportSiswa;
 use App\Domains\People\Services\ImportSiswaService;
+use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
@@ -30,8 +31,15 @@ final class PeriksaImportSiswa implements ShouldQueue
     {
         $import = ImportSiswa::query()->find($this->importId);
 
-        if ($import !== null) {
+        if ($import === null) {
+            return;
+        }
+
+        try {
             $service->pratinjau($import);
+        } catch (PelanggaranAturanKesiswaan) {
+            // Cancelled or ended before this job ran: nothing to check, and
+            // not a failed job.
         }
     }
 

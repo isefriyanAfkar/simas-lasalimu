@@ -16,6 +16,7 @@ use App\Domains\People\Services\Import\KolomImportSiswa;
 use App\Domains\People\Services\Import\PeriksaImportSiswa;
 use App\Domains\People\Services\Import\ProsesImportSiswa;
 use App\Domains\People\Services\Import\SimpanImportSiswa;
+use Closure;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -23,6 +24,7 @@ use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -40,11 +42,13 @@ use Throwable;
  *   transaction that is always rolled back; only the result is stored on
  *   the import (siap, or bergalat with its errors).
  * - antrekanSimpan() then simpan(): only from siap. The rows are applied
- *   again in one transaction, committed only when no row has an error,
- *   together with one log entry for the whole import; the file is deleted
- *   after the commit. An error that appears now (the data changed since the
- *   check) saves nothing and sends the import back to bergalat.
- * - batal(): deletes the file.
+ *   again in one transaction, committed only when no row has an error and
+ *   the result is the one the operator confirmed, together with one log
+ *   entry for the whole import; the file is deleted after the commit. An
+ *   error that appears now saves nothing and sends the import back to
+ *   bergalat; another result (the data changed since the check) saves
+ *   nothing and sends it back to siap, to be confirmed again.
+ * - batal(): from menunggu, bergalat or siap; deletes the file.
  * - tandaiGagal(): a job that stopped; bersihkan(): the scheduled cleanup.
  *
  * Neither run names whoever holds a NIK, whatever the operator may see
@@ -63,7 +67,13 @@ use Throwable;
  *   and may warm the permission cache with what the database already holds.
  * The services fire no other events, jobs or file writes.
  *
- * Every change is made in the name of the operator who uploaded the file.
+ * The check runs in the name of the operator who uploaded the file; the
+ * save, the cancel and every error file download in the name of whoever
+ * pressed the button, each with a log entry.
+ *
+ * Every status change is one conditional UPDATE on the status it expects
+ * (ubahJikaMasih()): of an operator, a job and the cleanup moving one
+ * import at once, exactly one wins, and the others leave it as it is.
  */
 class ImportSiswaService
 {
@@ -111,6 +121,10 @@ class ImportSiswaService
 
     public const string PESAN_TERLANTAR = 'Dibatalkan otomatis: tidak dilanjutkan dalam 24 jam.';
 
+    public const string PESAN_BERUBAH = 'Data di sistem berubah sejak pemeriksaan, jadi hasilnya berbeda dan tidak ada yang disimpan. Periksa ringkasan dan daftar pindah rombel yang baru, lalu tekan Simpan lagi.';
+
+    public const string JENIS_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
     public function __construct(
         private BacaFileImportSiswa $bacaFile,
         private ProsesImportSiswa $proses,
@@ -153,15 +167,16 @@ class ImportSiswaService
     }
 
     /**
-     * The uploaded file is deleted when it is refused.
+     * The uploaded file is deleted when it is refused, except a file another
+     * import uses, which is refused as if it did not exist and kept.
      *
-     * @throws ValidationException when $path is not an uploaded .xlsx in FOLDER, or is too large
+     * @throws ValidationException when $path is not an uploaded .xlsx in FOLDER, is another import's file, or is too large
      * @throws PelanggaranAturanAkademik when the school year is before the active one
      * @throws PelanggaranAturanKesiswaan when another import of the school year is not over
      */
     public function mulai(User $pelaku, TahunAjaran $tahunAjaran, string $path, string $namaFile): ImportSiswa
     {
-        if (! $this->fileAda($path)) {
+        if (! $this->fileAda($path) || ImportSiswa::query()->where('path', $path)->exists()) {
             throw ValidationException::withMessages(['file' => self::PESAN_FILE_TIDAK_ADA]);
         }
 
@@ -212,82 +227,114 @@ class ImportSiswaService
     }
 
     /**
-     * The check: nothing but the import itself is written.
+     * The check: nothing but the import itself is written. It starts only
+     * from menunggu, bergalat or siap, and its result is stored only while
+     * the import is still memeriksa: an import another process ended in the
+     * meantime (the cleanup) keeps that end.
      *
-     * @throws PelanggaranAturanKesiswaan when the import is over or being saved
+     * @throws PelanggaranAturanKesiswaan when the import is over, or being checked or saved
      */
     public function pratinjau(ImportSiswa $import): ImportSiswa
     {
-        $import->refresh();
+        $mulai = $this->ubahJikaMasih($import, [StatusImportSiswa::Menunggu, StatusImportSiswa::Bergalat, StatusImportSiswa::Siap], [
+            'status' => StatusImportSiswa::Memeriksa,
+            'pesan' => null,
+            'diproses_sejak' => now(),
+        ]);
 
-        if ($import->status->selesai() || $import->status === StatusImportSiswa::Menyimpan) {
-            throw PelanggaranAturanKesiswaan::importSudahBerakhir();
+        if (! $mulai) {
+            throw $this->ditolak($import);
         }
 
-        $import->update(['status' => StatusImportSiswa::Memeriksa, 'diproses_sejak' => now()]);
-
-        $hasil = $this->jalankan($import, function (): void {
+        $import = $this->muat($import);
+        $hasil = $this->jalankan($import, $import->user, function (): void {
             // A check never keeps anything.
         });
 
-        if ($hasil === null) {
-            return $import;
+        if ($hasil !== null) {
+            $this->ubahJikaMasih($import, [StatusImportSiswa::Memeriksa], [
+                'status' => $hasil->bersih() ? StatusImportSiswa::Siap : StatusImportSiswa::Bergalat,
+                ...$this->hasil($hasil),
+            ]);
         }
-
-        $import->update([
-            'status' => $hasil->bersih() ? StatusImportSiswa::Siap : StatusImportSiswa::Bergalat,
-            ...$this->hasil($hasil),
-        ]);
-
-        return $import;
-    }
-
-    /**
-     * Queue the save of a siap import: it becomes menyimpan at once, so a
-     * second click is refused.
-     *
-     * @throws PelanggaranAturanKesiswaan when the import is not siap
-     */
-    public function antrekanSimpan(ImportSiswa $import): ImportSiswa
-    {
-        $diubah = ImportSiswa::query()
-            ->whereKey($import->getKey())
-            ->where('status', StatusImportSiswa::Siap->value)
-            ->update(['status' => StatusImportSiswa::Menyimpan->value, 'diproses_sejak' => null]);
-
-        if ($diubah !== 1) {
-            throw PelanggaranAturanKesiswaan::importBelumSiap();
-        }
-
-        SimpanImportSiswa::dispatch((int) $import->getKey());
 
         return $import->refresh();
     }
 
     /**
-     * From siap, or from menyimpan as queued by antrekanSimpan().
+     * Queue the save of a siap import in the name of $pelaku, who pressed
+     * Simpan: it becomes menyimpan at once, so a second click is refused.
      *
-     * @throws PelanggaranAturanKesiswaan when the import is neither
+     * @throws PelanggaranAturanKesiswaan when the import is not siap
      */
-    public function simpan(ImportSiswa $import): ImportSiswa
+    public function antrekanSimpan(ImportSiswa $import, User $pelaku): ImportSiswa
     {
-        $import->refresh();
+        $diantrekan = $this->ubahJikaMasih($import, [StatusImportSiswa::Siap], [
+            'status' => StatusImportSiswa::Menyimpan,
+            'pesan' => null,
+            'diproses_sejak' => null,
+        ]);
 
-        if (! in_array($import->status, [StatusImportSiswa::Siap, StatusImportSiswa::Menyimpan], true)) {
+        if (! $diantrekan) {
             throw PelanggaranAturanKesiswaan::importBelumSiap();
         }
 
-        $import->update(['status' => StatusImportSiswa::Menyimpan, 'diproses_sejak' => now()]);
+        SimpanImportSiswa::dispatch((int) $import->getKey(), (int) $pelaku->getKey());
 
-        $hasil = $this->jalankan($import, function (HasilImportSiswa $hasil) use ($import): bool {
+        return $import->refresh();
+    }
+
+    /**
+     * From siap, or from menyimpan as queued by antrekanSimpan(). Every
+     * change, and the import's log entry, is made in the name of $pelaku.
+     * The rows are committed only when:
+     * - no row has an error (else bergalat with the new errors);
+     * - the import is still menyimpan, read with a lock held until the
+     *   commit: an import the cleanup or a failed job ended meanwhile keeps
+     *   that end and nothing is saved, and none can end it while it commits;
+     * - the counts and the rombel moves are those of the check the operator
+     *   confirmed (else siap again with the new result and PESAN_BERUBAH,
+     *   to be confirmed again).
+     *
+     * @throws PelanggaranAturanKesiswaan when the import is neither
+     */
+    public function simpan(ImportSiswa $import, User $pelaku): ImportSiswa
+    {
+        $mulai = $this->ubahJikaMasih($import, [StatusImportSiswa::Siap, StatusImportSiswa::Menyimpan], [
+            'status' => StatusImportSiswa::Menyimpan,
+            'pesan' => null,
+            'diproses_sejak' => now(),
+        ]);
+
+        if (! $mulai) {
+            throw PelanggaranAturanKesiswaan::importBelumSiap();
+        }
+
+        $import = $this->muat($import);
+        $dikonfirmasi = ['ringkasan' => $import->ringkasan, 'pindah' => $import->pindah];
+        $berakhir = false;
+
+        $hasil = $this->jalankan($import, $pelaku, function (HasilImportSiswa $hasil) use ($import, $pelaku, $dikonfirmasi, &$berakhir): bool {
             if (! $hasil->bersih()) {
+                return false;
+            }
+
+            $status = ImportSiswa::query()->whereKey($import->getKey())->lockForUpdate()->firstOrFail(['status'])->status;
+
+            if ($status !== StatusImportSiswa::Menyimpan) {
+                $berakhir = true;
+
+                return false;
+            }
+
+            if ($hasil->ringkasan !== $dikonfirmasi['ringkasan'] || $hasil->pindah !== $dikonfirmasi['pindah']) {
                 return false;
             }
 
             $path = (string) $import->path;
 
             activity(SiswaService::LOG_NAME)
-                ->causedBy($import->user)
+                ->causedBy($pelaku)
                 ->performedOn($import)
                 ->event(AksiKesiswaan::SiswaDiimpor->value)
                 ->withProperties([
@@ -305,29 +352,34 @@ class ImportSiswaService
             ]);
 
             DB::afterCommit(fn () => Storage::disk(self::DISK)->delete($path));
+            $berakhir = true;
 
             return true;
         });
 
-        if ($hasil !== null && ! $hasil->bersih()) {
-            $import->update(['status' => StatusImportSiswa::Bergalat, ...$this->hasil($hasil)]);
+        if ($hasil !== null && ! $berakhir) {
+            $this->ubahJikaMasih($import, [StatusImportSiswa::Menyimpan], $hasil->bersih()
+                ? ['status' => StatusImportSiswa::Siap, 'pesan' => self::PESAN_BERUBAH, ...$this->hasil($hasil)]
+                : ['status' => StatusImportSiswa::Bergalat, ...$this->hasil($hasil)]);
         }
 
-        return $import;
+        return $import->refresh();
     }
 
     /**
-     * @throws PelanggaranAturanKesiswaan when the import is over or being saved
+     * Cancelled by $pelaku, with a log entry naming them.
+     *
+     * @throws PelanggaranAturanKesiswaan when the import is over, or being checked or saved
      */
-    public function batal(ImportSiswa $import): ImportSiswa
+    public function batal(ImportSiswa $import, User $pelaku): ImportSiswa
     {
-        $import->refresh();
+        $dibatalkan = $this->akhiri($import, [StatusImportSiswa::Menunggu, StatusImportSiswa::Bergalat, StatusImportSiswa::Siap], StatusImportSiswa::Dibatalkan, null, function (ImportSiswa $import) use ($pelaku): void {
+            $this->catat($import, $pelaku, AksiKesiswaan::ImportDibatalkan);
+        });
 
-        if ($import->status->selesai() || $import->status === StatusImportSiswa::Menyimpan) {
-            throw PelanggaranAturanKesiswaan::importSudahBerakhir();
+        if (! $dibatalkan) {
+            throw $this->ditolak($import);
         }
-
-        $this->akhiri($import, StatusImportSiswa::Dibatalkan, null);
 
         return $import;
     }
@@ -342,8 +394,8 @@ class ImportSiswaService
     {
         $import = ImportSiswa::query()->find($importId);
 
-        if ($import !== null && in_array($import->status, [StatusImportSiswa::Menunggu, StatusImportSiswa::Memeriksa, StatusImportSiswa::Menyimpan], true)) {
-            $this->akhiri($import, StatusImportSiswa::Gagal, $pesan);
+        if ($import !== null) {
+            $this->akhiri($import, [StatusImportSiswa::Menunggu, StatusImportSiswa::Memeriksa, StatusImportSiswa::Menyimpan], StatusImportSiswa::Gagal, $pesan);
         }
     }
 
@@ -356,6 +408,8 @@ class ImportSiswaService
      * - siap or bergalat, untouched for BATAS_TERLANTAR_JAM: dibatalkan;
      * - a file in FOLDER older than BATAS_TERLANTAR_JAM that no import still
      *   uses: deleted.
+     * Each import is ended only while it still has the status it was found
+     * with: one that moved on meanwhile is left alone and not counted.
      *
      * @return array{macet: int, terlantar: int, file: int}
      */
@@ -373,18 +427,21 @@ class ImportSiswaService
             ->get();
 
         foreach ($macet as $import) {
-            $this->akhiri($import, StatusImportSiswa::Gagal, $import->diproses_sejak === null ? self::PESAN_ANTREAN_MATI : self::PESAN_MACET);
-            $hasil['macet']++;
+            if ($this->akhiri($import, [$import->status], StatusImportSiswa::Gagal, $import->diproses_sejak === null ? self::PESAN_ANTREAN_MATI : self::PESAN_MACET)) {
+                $hasil['macet']++;
+            }
         }
 
         foreach (ImportSiswa::query()->where('status', StatusImportSiswa::Menunggu->value)->where('updated_at', '<', $batasTerlantar)->get() as $import) {
-            $this->akhiri($import, StatusImportSiswa::Gagal, self::PESAN_ANTREAN_MATI);
-            $hasil['macet']++;
+            if ($this->akhiri($import, [StatusImportSiswa::Menunggu], StatusImportSiswa::Gagal, self::PESAN_ANTREAN_MATI)) {
+                $hasil['macet']++;
+            }
         }
 
         foreach (ImportSiswa::query()->whereIn('status', [StatusImportSiswa::Siap->value, StatusImportSiswa::Bergalat->value])->where('updated_at', '<', $batasTerlantar)->get() as $import) {
-            $this->akhiri($import, StatusImportSiswa::Dibatalkan, self::PESAN_TERLANTAR);
-            $hasil['terlantar']++;
+            if ($this->akhiri($import, [$import->status], StatusImportSiswa::Dibatalkan, self::PESAN_TERLANTAR)) {
+                $hasil['terlantar']++;
+            }
         }
 
         $dipakai = ImportSiswa::query()->whereNotNull('path')->pluck('path')->all();
@@ -406,9 +463,10 @@ class ImportSiswaService
      * shaded. Written to a temporary file whose path is returned; null when
      * the import has no row error or its file is gone. Only the operator's
      * own cells and the stored messages, which hold no NIK and no name of a
-     * NIK holder.
+     * NIK holder. Every file made is logged in the name of $pelaku (the
+     * import and when, never the content).
      */
-    public function fileGalat(ImportSiswa $import): ?string
+    public function fileGalat(ImportSiswa $import, User $pelaku): ?string
     {
         $perBaris = [];
 
@@ -460,13 +518,43 @@ class ImportSiswaService
                 $sheet->getStyle([$kolomGalat, $baris])->getAlignment()->setWrapText(true);
             }
 
-            $path = tempnam(sys_get_temp_dir(), 'galat-import').'.xlsx';
+            $path = self::fileSementaraBaru('galat-import');
             IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
-
-            return $path;
         } finally {
             $spreadsheet->disconnectWorksheets();
         }
+
+        $this->catat($import, $pelaku, AksiKesiswaan::FileGalatImportDiunduh);
+
+        return $path;
+    }
+
+    /**
+     * A new empty file in the system temporary folder, for a download that
+     * deletes it once sent. tempnam() itself creates the file, so this is
+     * the one file made (no second one with an extension added).
+     */
+    public static function fileSementaraBaru(string $awalan): string
+    {
+        $path = tempnam(sys_get_temp_dir(), $awalan);
+
+        if ($path === false) {
+            throw new RuntimeException('Tidak bisa membuat file sementara.');
+        }
+
+        return $path;
+    }
+
+    /**
+     * Whether an import is being checked or saved now, which holds the
+     * student, parent and account tables until it ends.
+     */
+    public function sedangMemproses(): bool
+    {
+        return ImportSiswa::query()
+            ->whereIn('status', [StatusImportSiswa::Memeriksa->value, StatusImportSiswa::Menyimpan->value])
+            ->whereNotNull('diproses_sejak')
+            ->exists();
     }
 
     public static function pesanTerlaluBesar(): string
@@ -485,25 +573,112 @@ class ImportSiswaService
         ));
     }
 
-    private function akhiri(ImportSiswa $import, StatusImportSiswa $status, ?string $pesan): void
+    /**
+     * Move the import to the values of $isian only while its status is one
+     * of $dari: a single conditional UPDATE, so of two processes moving it
+     * at once (an operator, a job, the cleanup) exactly one wins and the
+     * other sees false. The values go through the model's casts.
+     *
+     * @param  list<StatusImportSiswa>  $dari
+     * @param  array<string, mixed>  $isian
+     */
+    private function ubahJikaMasih(ImportSiswa $import, array $dari, array $isian): bool
     {
-        $this->hapusFile($import->path);
-        $import->update(['status' => $status, 'pesan' => $pesan, 'path' => null, 'diproses_sejak' => null, 'selesai_pada' => now()]);
+        return ImportSiswa::query()
+            ->whereKey($import->getKey())
+            ->whereIn('status', array_map(fn (StatusImportSiswa $status): string => $status->value, $dari))
+            ->update((new ImportSiswa)->forceFill($isian)->getAttributes()) === 1;
     }
 
     /**
-     * Read the file and apply its rows in one transaction. $simpan decides
-     * with the result: true commits, anything else rolls back. Returns null
-     * when the file is gone (the import is then gagal).
+     * End the import with $status while it is still in one of $dari (see
+     * ubahJikaMasih()); $catat writes its log entry in the same
+     * transaction. Only the process that ended it deletes its file.
+     *
+     * @param  list<StatusImportSiswa>  $dari
+     * @param  (Closure(ImportSiswa): void)|null  $catat
+     */
+    private function akhiri(ImportSiswa $import, array $dari, StatusImportSiswa $status, ?string $pesan, ?Closure $catat = null): bool
+    {
+        $path = ImportSiswa::query()->whereKey($import->getKey())->value('path');
+
+        $berakhir = DB::transaction(function () use ($import, $dari, $status, $pesan, $catat): bool {
+            $diakhiri = $this->ubahJikaMasih($import, $dari, [
+                'status' => $status,
+                'pesan' => $pesan,
+                'path' => null,
+                'diproses_sejak' => null,
+                'selesai_pada' => now(),
+            ]);
+
+            if ($diakhiri && $catat !== null) {
+                $catat($import);
+            }
+
+            return $diakhiri;
+        });
+
+        if ($berakhir) {
+            $this->hapusFile(is_string($path) ? $path : null);
+        }
+
+        $import->refresh();
+
+        return $berakhir;
+    }
+
+    /**
+     * Why the import cannot be checked or cancelled now.
+     */
+    private function ditolak(ImportSiswa $import): PelanggaranAturanKesiswaan
+    {
+        $status = ImportSiswa::query()->findOrFail($import->getKey(), ['id', 'status'])->status;
+
+        return match (true) {
+            $status->selesai() => PelanggaranAturanKesiswaan::importSudahBerakhir(),
+            default => PelanggaranAturanKesiswaan::importSedangDiproses(),
+        };
+    }
+
+    /**
+     * The import as stored, with what a run reads.
+     */
+    private function muat(ImportSiswa $import): ImportSiswa
+    {
+        return ImportSiswa::query()->with(['tahunAjaran', 'user'])->findOrFail($import->getKey());
+    }
+
+    /**
+     * A log entry about the import in the name of $pelaku: which file, for
+     * which school year; never its content.
+     */
+    private function catat(ImportSiswa $import, User $pelaku, AksiKesiswaan $aksi): void
+    {
+        activity(SiswaService::LOG_NAME)
+            ->causedBy($pelaku)
+            ->performedOn($import)
+            ->event($aksi->value)
+            ->withProperties([
+                'nama_file' => $import->nama_file,
+                'tahun_ajaran' => $import->tahunAjaran->nama,
+            ])
+            ->log($aksi->label());
+    }
+
+    /**
+     * Read the file and apply its rows in one transaction, in the name of
+     * $pelaku. $simpan decides with the result: true commits, anything else
+     * rolls back. Returns null when the file is gone (the import is then
+     * gagal).
      *
      * @param  callable(HasilImportSiswa): (bool|void)  $simpan
      */
-    private function jalankan(ImportSiswa $import, callable $simpan): ?HasilImportSiswa
+    private function jalankan(ImportSiswa $import, User $pelaku, callable $simpan): ?HasilImportSiswa
     {
         $path = (string) $import->path;
 
         if (! $this->fileAda($path)) {
-            $this->akhiri($import, StatusImportSiswa::Gagal, self::PESAN_FILE_TIDAK_ADA);
+            $this->akhiri($import, [StatusImportSiswa::Memeriksa, StatusImportSiswa::Menyimpan], StatusImportSiswa::Gagal, self::PESAN_FILE_TIDAK_ADA);
 
             return null;
         }
@@ -514,11 +689,11 @@ class ImportSiswaService
             return HasilImportSiswa::galatFile($baca->galatFile);
         }
 
-        return UserService::tanpaMenyebutPemilikNik(function () use ($import, $baca, $simpan): HasilImportSiswa {
+        return UserService::tanpaMenyebutPemilikNik(function () use ($import, $pelaku, $baca, $simpan): HasilImportSiswa {
             DB::beginTransaction();
 
             try {
-                $hasil = $this->proses->jalankan($import->user, $import->tahunAjaran, $baca->baris);
+                $hasil = $this->proses->jalankan($pelaku, $import->tahunAjaran, $baca->baris);
                 $tetap = $simpan($hasil) === true;
             } catch (Throwable $exception) {
                 DB::rollBack();

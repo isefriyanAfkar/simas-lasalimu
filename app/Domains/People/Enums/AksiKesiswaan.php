@@ -19,6 +19,8 @@ enum AksiKesiswaan: string
     case TandaMeninggalWaliDibatalkan = 'tanda_meninggal_wali_dibatalkan';
     case WaliDihapus = 'wali_dihapus';
     case SiswaDiimpor = 'import_siswa';
+    case ImportDibatalkan = 'import_siswa_dibatalkan';
+    case FileGalatImportDiunduh = 'file_galat_import_diunduh';
 
     public function label(): string
     {
@@ -33,6 +35,8 @@ enum AksiKesiswaan: string
             self::TandaMeninggalWaliDibatalkan => 'Tanda meninggal wali murid dibatalkan',
             self::WaliDihapus => 'Wali murid dihapus',
             self::SiswaDiimpor => 'Siswa diimpor dari Excel',
+            self::ImportDibatalkan => 'Import siswa dibatalkan',
+            self::FileGalatImportDiunduh => 'File galat import siswa diunduh',
         };
     }
 }

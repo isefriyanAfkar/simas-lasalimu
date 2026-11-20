@@ -17,11 +17,13 @@ use App\Filament\Resources\Siswas\Pages\ListSiswas;
 use Database\Seeders\PeranDanIzinSeeder;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Pages\Dashboard;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use Spatie\Activitylog\Models\Activity;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\Feature\Domains\People\Services\Import\MembuatFileImport;
@@ -171,6 +173,56 @@ class ImportSiswaResourceTest extends TestCase
 
         $this->assertSame(StatusImportSiswa::Menyimpan, $import->fresh()?->status);
         Queue::assertPushed(SimpanImportSiswa::class, fn (SimpanImportSiswa $job): bool => $job->importId === $import->id);
+    }
+
+    public function test_the_page_actions_check_the_permission_when_they_are_called(): void
+    {
+        $siap = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Siap, 'ringkasan' => [], 'galat' => [], 'pindah' => []]);
+        $path = $this->fileImport($this->tahunAjaran, [['nis' => '20261001', 'nama' => 'Budi']]);
+        $lainTahun = TahunAjaran::factory()->create(['nama' => '2027/2028', 'tanggal_mulai' => '2027-07-12', 'tanggal_selesai' => '2028-06-24']);
+        $bergalat = ImportSiswa::factory()->for($lainTahun)->for($this->operator)->create([
+            'path' => $path,
+            'status' => StatusImportSiswa::Bergalat,
+            'galat' => [['baris' => 2, 'kolom' => 'jenis_kelamin', 'pesan' => 'Jenis kelamin wajib diisi.']],
+        ]);
+        $halamanSiap = Livewire::test(ImportSiswaPage::class, ['import' => $siap->id]);
+        $halamanBergalat = Livewire::test(ImportSiswaPage::class, ['import' => $bergalat->id]);
+
+        // The permission is taken away while the pages are open; the calls
+        // below are what the browser would still send (callAction() would
+        // stop at the button being hidden).
+        Role::findByName('operator', 'web')->revokePermissionTo('Import:Siswa');
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $halamanSiap->call('mountAction', 'simpan')->call('callMountedAction');
+        $halamanSiap->call('mountAction', 'batal')->call('callMountedAction');
+        $halamanBergalat->call('mountAction', 'unduhGalat')->call('callMountedAction')->assertNoFileDownloaded();
+
+        $this->assertSame(StatusImportSiswa::Siap, $siap->fresh()?->status);
+        Queue::assertNothingPushed();
+        $this->assertSame(0, Activity::query()->whereIn('event', ['import_siswa_dibatalkan', 'file_galat_import_diunduh'])->count());
+    }
+
+    public function test_every_panel_page_warns_while_an_import_is_checked_or_saved(): void
+    {
+        $peringatan = ['Import siswa sedang diproses.', 'Penyimpanan data siswa, wali murid, dan akun pengguna, termasuk masuk dengan "Ingat saya", bisa tertunda sampai import selesai.'];
+        $import = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Siap]);
+        $admin = User::factory()->superAdmin()->create();
+        $this->actingAs($admin);
+
+        $this->get(Dashboard::getUrl())->assertOk()->assertDontSee($peringatan[0]);
+
+        // A save that is only queued holds nothing yet.
+        $import->update(['status' => StatusImportSiswa::Menyimpan, 'diproses_sejak' => null]);
+        $this->get(Dashboard::getUrl())->assertDontSee($peringatan[0]);
+
+        foreach ([StatusImportSiswa::Memeriksa, StatusImportSiswa::Menyimpan] as $status) {
+            $import->update(['status' => $status, 'diproses_sejak' => now()]);
+            $this->get(Dashboard::getUrl())->assertSee($peringatan);
+        }
+
+        $this->actingAs($this->operator);
+        $this->get(ListSiswas::getUrl())->assertSee($peringatan);
     }
 
     public function test_a_check_with_errors_lists_them_offers_the_error_file_and_can_be_cancelled(): void

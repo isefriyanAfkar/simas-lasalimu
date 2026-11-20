@@ -2,8 +2,10 @@
 
 namespace App\Domains\People\Services\Import;
 
+use App\Domains\Foundation\Models\User;
 use App\Domains\People\Models\ImportSiswa;
 use App\Domains\People\Services\ImportSiswaService;
+use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
@@ -23,14 +25,25 @@ final class SimpanImportSiswa implements ShouldQueue
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public int $importId) {}
+    /**
+     * @param  int  $pelakuId  the operator who pressed Simpan; the save is made in their name
+     */
+    public function __construct(public int $importId, public int $pelakuId) {}
 
     public function handle(ImportSiswaService $service): void
     {
         $import = ImportSiswa::query()->find($this->importId);
+        $pelaku = User::query()->find($this->pelakuId);
 
-        if ($import !== null) {
-            $service->simpan($import);
+        if ($import === null || $pelaku === null) {
+            return;
+        }
+
+        try {
+            $service->simpan($import, $pelaku);
+        } catch (PelanggaranAturanKesiswaan) {
+            // Ended before this job ran (the cleanup): nothing to save, and
+            // not a failed job.
         }
     }
 

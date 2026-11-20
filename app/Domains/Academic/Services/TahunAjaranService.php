@@ -7,6 +7,7 @@ use App\Domains\Academic\Enums\JenisSemester;
 use App\Domains\Academic\Models\Semester;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Models\User;
+use App\Domains\People\Models\ImportSiswa;
 use Closure;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -136,6 +137,14 @@ class TahunAjaranService
 
             if ($jumlahRombel > 0) {
                 throw PelanggaranAturanAkademik::tahunAjaranDipakaiRombel($tahunAjaran->nama, $jumlahRombel);
+            }
+
+            // An import keeps its school year (restrictOnDelete), whatever
+            // its status: the import history is never deleted.
+            $jumlahImport = ImportSiswa::query()->where('tahun_ajaran_id', $tahunAjaran->getKey())->sharedLock()->count();
+
+            if ($jumlahImport > 0) {
+                throw PelanggaranAturanAkademik::tahunAjaranDipakaiImport($tahunAjaran->nama, $jumlahImport);
             }
 
             foreach ($tahunAjaran->semester as $semester) {

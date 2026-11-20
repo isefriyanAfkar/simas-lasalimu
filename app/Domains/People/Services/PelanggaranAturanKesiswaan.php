@@ -30,6 +30,11 @@ class PelanggaranAturanKesiswaan extends RuntimeException
         return new self('Import ini sudah tersimpan, dibatalkan, atau gagal. Unggah file lagi untuk import baru.');
     }
 
+    public static function importSedangDiproses(): self
+    {
+        return new self('Import ini sedang diperiksa atau disimpan. Tunggu sampai selesai.');
+    }
+
     public static function sudahAktif(): self
     {
         return new self('Siswa ini masih aktif.');

@@ -18,6 +18,7 @@ use App\Domains\People\Models\Ptk;
 use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\SiswaWali;
 use App\Domains\People\Models\WaliMurid;
+use App\Domains\People\Services\Import\BacaFileImportSiswa;
 use App\Domains\People\Services\Import\KolomImportSiswa;
 use App\Domains\People\Services\Import\ProsesImportSiswa;
 use App\Domains\People\Services\Import\TemplateImportSiswa;
@@ -61,6 +62,8 @@ class ImportSiswaServiceTest extends TestCase
     private Rombel $x1;
 
     private Rombel $x2;
+
+    private bool $selaTerjadi = false;
 
     protected function setUp(): void
     {
@@ -138,7 +141,7 @@ class ImportSiswaServiceTest extends TestCase
         $this->assertSame(['3:jenis_kelamin'], array_keys($this->galat($import)));
         $this->assertSame(1, $import->ringkasan['baris_bergalat']);
 
-        $this->assertRejected('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.', fn () => $this->service()->simpan($import));
+        $this->assertRejected('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.', fn () => $this->service()->simpan($import, $this->operator));
         $this->assertSame(0, Siswa::query()->count());
         $this->assertSame(1, User::query()->count());
         $this->assertSame(0, WaliMurid::query()->count());
@@ -153,7 +156,7 @@ class ImportSiswaServiceTest extends TestCase
         $this->assertSame(StatusImportSiswa::Siap, $import->status);
 
         Siswa::factory()->for(User::factory()->state(['name' => 'Dodi']))->create(['nisn' => '0012345678']);
-        $import = $this->service()->simpan($import);
+        $import = $this->service()->simpan($import, $this->operator);
 
         $this->assertSame(StatusImportSiswa::Bergalat, $import->status);
         $this->assertSame(['NISN ini sudah dipakai oleh Dodi.'], $this->galat($import)['3:nisn']);
@@ -163,12 +166,25 @@ class ImportSiswaServiceTest extends TestCase
 
     public function test_an_empty_cell_never_clears_stored_data(): void
     {
-        $budi = $this->siswa('Budi', '20261001', ['nisn' => '0012345678', 'asal_sekolah' => 'SMP 1'], ['tempat_lahir' => 'Kendari', 'alamat' => 'Jl. Mawar', 'no_hp' => '6281234567891']);
-        $ahmad = $this->tautkan($budi, 'Ahmad', HubunganWali::Ayah, ['no_hp' => '6281234567890'], 'Petani');
+        $budi = $this->siswa('Budi', '20261001', ['nisn' => '0012345678', 'asal_sekolah' => 'SMP 1', 'tanggal_masuk' => '2026-07-13'], [
+            'tempat_lahir' => 'Kendari', 'alamat' => 'Jl. Mawar', 'no_hp' => '6281234567891',
+            'email' => 'budi@contoh.sch.id', 'jenis_kelamin' => JenisKelamin::Perempuan, 'agama' => 'Islam', 'tanggal_lahir' => '2010-05-01',
+        ]);
+        $budi->user->isiNik(self::NIK_SISWA);
+        $budi->user->save();
+        $ahmad = $this->tautkan($budi, 'Ahmad', HubunganWali::Ayah, ['no_hp' => '6281234567890', 'nik' => self::NIK_AYAH], 'Petani');
 
-        $import = $this->simpan([['nis' => '20261001']]);
+        $import = $this->simpan([['nis' => '20261001', 'ayah_nama' => 'Ahmad']]);
 
         $budi->refresh();
+        $this->assertSame('budi@contoh.sch.id', $budi->user->email);
+        $this->assertSame(JenisKelamin::Perempuan, $budi->user->jenis_kelamin);
+        $this->assertSame('Islam', $budi->user->agama?->value);
+        $this->assertSame('2010-05-01', $budi->user->tanggal_lahir?->toDateString());
+        $this->assertSame('2026-07-13', $budi->tanggal_masuk?->toDateString());
+        $this->assertSame(self::NIK_SISWA, $budi->user->nik);
+        $this->assertSame(self::NIK_AYAH, $ahmad->user->fresh()?->nik);
+        $this->assertSame('6281234567890', $ahmad->user->fresh()?->no_hp);
         $this->assertSame('0012345678', $budi->nisn);
         $this->assertSame('SMP 1', $budi->asal_sekolah);
         $this->assertSame('Kendari', $budi->user->tempat_lahir);
@@ -242,7 +258,7 @@ class ImportSiswaServiceTest extends TestCase
         $this->assertSame([['baris' => 2, 'nis' => '20261001', 'nama' => 'Budi', 'dari' => 'X-1', 'ke' => 'X-2']], $import->pindah);
         $this->assertSame(1, $import->ringkasan['siswa_dipindah']);
 
-        $this->service()->simpan($import);
+        $this->service()->simpan($import, $this->operator);
 
         $this->assertSame($this->x2->id, PenempatanRombel::query()->where('siswa_id', $budi->id)->value('rombel_id'));
         $this->assertSame(1, Activity::query()->where('event', 'siswa_dipindah_rombel')->count());
@@ -538,12 +554,12 @@ class ImportSiswaServiceTest extends TestCase
     {
         $import = $this->pratinjau([$this->baris(['nis' => '20261001', 'nama' => 'Budi'])]);
 
-        $import = $this->service()->batal($import);
+        $import = $this->service()->batal($import, $this->operator);
 
         $this->assertSame(StatusImportSiswa::Dibatalkan, $import->status);
         $this->assertNull($import->path);
         $this->assertSame([], Storage::disk('local')->allFiles());
-        $this->assertRejected('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.', fn () => $this->service()->simpan($import));
+        $this->assertRejected('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.', fn () => $this->service()->simpan($import, $this->operator));
     }
 
     public function test_only_an_uploaded_file_in_the_import_folder_is_accepted(): void
@@ -589,13 +605,144 @@ class ImportSiswaServiceTest extends TestCase
         $this->assertSame(['2:nis'], array_keys($this->galat($import)));
         $this->assertSame(0, $import->ringkasan['siswa_baru']);
 
-        $this->service()->batal($import);
+        $this->service()->batal($import, $this->operator);
         $spreadsheet = app(TemplateImportSiswa::class)->buat($this->tahunAjaran);
         $spreadsheet->getSheetByName(KolomImportSiswa::LEMBAR_DATA)?->setCellValue('A1', 'Nomor');
         $import = $this->service()->pratinjau($this->service()->mulai($this->operator, $this->tahunAjaran, $this->simpanFile($spreadsheet), 'lama.xlsx'));
 
         $this->assertSame(StatusImportSiswa::Bergalat, $import->status);
         $this->assertSame([['baris' => null, 'kolom' => null, 'pesan' => 'Kolom tidak ditemukan: NIS. Pakai template terbaru.']], $import->galat);
+    }
+
+    public function test_a_check_ended_by_another_process_meanwhile_keeps_that_end(): void
+    {
+        $import = $this->import([$this->baris(['nis' => '20261001', 'nama' => 'Budi'])]);
+        $this->selagiBerjalan($import, StatusImportSiswa::Gagal);
+
+        $this->service()->pratinjau($import);
+
+        $this->assertTrue($this->selaTerjadi);
+        $import = ImportSiswa::query()->findOrFail($import->id);
+        $this->assertSame(StatusImportSiswa::Gagal, $import->status);
+        $this->assertNull($import->ringkasan);
+    }
+
+    public function test_a_save_ended_by_another_process_meanwhile_saves_nothing(): void
+    {
+        $import = $this->pratinjau([$this->baris(['nis' => '20261001', 'nama' => 'Budi'])]);
+        $import = ImportSiswa::query()->findOrFail($import->id);
+        $this->selagiBerjalan($import, StatusImportSiswa::Gagal);
+
+        $this->service()->simpan($import, $this->operator);
+
+        $this->assertTrue($this->selaTerjadi);
+        $this->assertSame(StatusImportSiswa::Gagal, $import->fresh()?->status);
+        $this->assertSame(0, Siswa::query()->count());
+        $this->assertSame(0, Activity::query()->where('event', 'import_siswa')->count());
+    }
+
+    public function test_an_import_being_checked_or_saved_cannot_be_cancelled(): void
+    {
+        foreach ([StatusImportSiswa::Memeriksa, StatusImportSiswa::Menyimpan] as $status) {
+            $import = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Menunggu]);
+            // The model the screen holds still says menunggu.
+            ImportSiswa::query()->whereKey($import->id)->update(['status' => $status->value]);
+
+            $this->assertRejected('Import ini sedang diperiksa atau disimpan. Tunggu sampai selesai.', fn () => $this->service()->batal($import, $this->operator));
+            $this->assertSame($status, $import->fresh()?->status);
+            $import->update(['status' => StatusImportSiswa::Gagal]);
+        }
+    }
+
+    public function test_a_save_whose_result_differs_from_the_check_saves_nothing_and_asks_again(): void
+    {
+        $budi = $this->siswa('Budi', '20261001');
+        $import = $this->pratinjau([['nis' => '20261001', 'rombel' => 'X-1']]);
+        $this->assertSame([], $import->pindah);
+
+        // Someone places Budi in X-2 between the check and the save.
+        $this->tempatkan($budi, $this->x2);
+        $import = $this->service()->simpan($import, $this->operator);
+
+        $import = ImportSiswa::query()->findOrFail($import->id);
+        $this->assertSame(StatusImportSiswa::Siap, $import->status);
+        $this->assertSame('Data di sistem berubah sejak pemeriksaan, jadi hasilnya berbeda dan tidak ada yang disimpan. Periksa ringkasan dan daftar pindah rombel yang baru, lalu tekan Simpan lagi.', $import->pesan);
+        $this->assertSame([['baris' => 2, 'nis' => '20261001', 'nama' => 'Budi', 'dari' => 'X-2', 'ke' => 'X-1']], $import->pindah);
+        $this->assertSame(1, $import->ringkasan['siswa_dipindah']);
+        $this->assertSame($this->x2->id, PenempatanRombel::query()->where('siswa_id', $budi->id)->value('rombel_id'));
+        $this->assertSame(0, Activity::query()->where('event', 'import_siswa')->count());
+        $this->assertTrue(Storage::disk('local')->exists((string) $import->path));
+
+        $import = $this->service()->simpan($import, $this->operator);
+
+        $this->assertSame(StatusImportSiswa::Selesai, $import->status);
+        $this->assertSame($this->x1->id, PenempatanRombel::query()->where('siswa_id', $budi->id)->value('rombel_id'));
+    }
+
+    public function test_a_save_with_other_moves_or_other_counts_than_the_check_saves_nothing(): void
+    {
+        $x3 = Rombel::factory()->for($this->tahunAjaran)->create(['tingkat' => Tingkat::X, 'nomor' => 3]);
+        $budi = $this->siswa('Budi', '20261001');
+        $this->tempatkan($budi, $this->x1);
+        $import = $this->pratinjau([
+            ['nis' => '20261001', 'rombel' => 'X-2'],
+            $this->baris(['nis' => '20261002', 'nama' => 'Ani', 'jenis_kelamin' => 'P']),
+        ]);
+
+        // Same counts, another move: Budi now comes from X-3.
+        PenempatanRombel::query()->where('siswa_id', $budi->id)->update(['rombel_id' => $x3->id]);
+        $import = $this->service()->simpan($import, $this->operator);
+
+        $this->assertSame(StatusImportSiswa::Siap, $import->status);
+        $this->assertSame('X-3', $import->pindah[0]['dari']);
+        $this->assertSame(0, Siswa::query()->where('nis', '20261002')->count());
+
+        // Same moves, other counts: Ani was added by someone meanwhile.
+        $this->siswa('Ani', '20261002');
+        $import = $this->service()->simpan($import, $this->operator);
+
+        $this->assertSame(StatusImportSiswa::Siap, $import->status);
+        $this->assertSame(0, $import->ringkasan['siswa_baru']);
+        $this->assertSame($x3->id, PenempatanRombel::query()->where('siswa_id', $budi->id)->value('rombel_id'));
+        $this->assertSame(0, Activity::query()->where('event', 'import_siswa')->count());
+    }
+
+    public function test_a_save_with_errors_keeps_the_end_another_process_gave_it_meanwhile(): void
+    {
+        $import = $this->pratinjau([$this->baris(['nis' => '20261001', 'nama' => 'Budi', 'nisn' => '0012345678'])]);
+        Siswa::factory()->for(User::factory()->state(['name' => 'Dodi']))->create(['nisn' => '0012345678']);
+        $import = ImportSiswa::query()->findOrFail($import->id);
+        $this->selagiBerjalan($import, StatusImportSiswa::Gagal);
+
+        $this->service()->simpan($import, $this->operator);
+
+        $this->assertTrue($this->selaTerjadi);
+        $this->assertSame(StatusImportSiswa::Gagal, $import->fresh()?->status);
+    }
+
+    public function test_a_nis_of_a_student_with_another_name_is_an_error(): void
+    {
+        $this->siswa('Budi', '20261001');
+        $this->siswa('Ani', '20261002');
+
+        $import = $this->pratinjau([
+            ['nis' => '20261001', 'nama' => 'Budiman'],
+            ['nis' => '20261002', 'nama' => ' ANI. ', 'alamat' => 'Jl. Melati'],
+        ]);
+
+        $this->assertSame(['2:nis' => ['NIS 20261001 sudah dipakai siswa dengan nama lain. Periksa NIS, atau ubah nama lewat layar Siswa.']], $this->galat($import));
+        $this->assertSame(1, $import->ringkasan['siswa_diperbarui']);
+    }
+
+    public function test_a_rombel_deleted_after_the_file_was_read_is_a_row_error(): void
+    {
+        $path = $this->file([$this->baris(['nis' => '20261001', 'nama' => 'Budi', 'rombel' => 'X-2'])]);
+        $baca = app(BacaFileImportSiswa::class)->baca(Storage::disk('local')->path($path), $this->tahunAjaran);
+        $this->x2->delete();
+
+        $hasil = DB::transaction(fn () => app(ProsesImportSiswa::class)->jalankan($this->operator, $this->tahunAjaran, $baca->baris));
+
+        $this->assertSame([['baris' => 2, 'kolom' => 'rombel', 'pesan' => 'Rombel ini baru saja dihapus. Pilih rombel lain, lalu unggah ulang file.']], $hasil->galat);
     }
 
     /**
@@ -617,7 +764,7 @@ class ImportSiswaServiceTest extends TestCase
         // One import per school year: a test that uploads again first
         // cancels the previous one that is not over, as the operator would.
         foreach ($this->service()->belumBerakhir() as $sebelumnya) {
-            $this->service()->batal($sebelumnya);
+            $this->service()->batal($sebelumnya, $this->operator);
         }
 
         return $this->service()->mulai($this->operator, $this->tahunAjaran, $this->file($baris), 'siswa.xlsx');
@@ -639,7 +786,7 @@ class ImportSiswaServiceTest extends TestCase
         $import = $this->pratinjau($baris);
         $this->assertSame(StatusImportSiswa::Siap, $import->status, (string) json_encode($import->galat));
 
-        return $this->service()->simpan($import);
+        return $this->service()->simpan($import, $this->operator);
     }
 
     /**
@@ -782,6 +929,25 @@ class ImportSiswaServiceTest extends TestCase
             ->where('utama', true)
             ->sole()
             ->waliMurid->user->name;
+    }
+
+    /**
+     * Another process (the cleanup, a job) changes the import's status in
+     * the middle of the next check or save: the first time the import is
+     * read after the call started, which is after the status it found was
+     * taken. The file is left in place, as a check or save that is past
+     * reading it.
+     */
+    private function selagiBerjalan(ImportSiswa $import, StatusImportSiswa $status): void
+    {
+        $this->selaTerjadi = false;
+
+        ImportSiswa::retrieved(function (ImportSiswa $dibaca) use ($import, $status): void {
+            if (! $this->selaTerjadi && $dibaca->is($import)) {
+                $this->selaTerjadi = true;
+                ImportSiswa::query()->whereKey($import->id)->update(['status' => $status->value]);
+            }
+        });
     }
 
     private function service(): ImportSiswaService

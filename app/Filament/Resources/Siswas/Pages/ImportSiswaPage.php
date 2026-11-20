@@ -29,7 +29,10 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * One student import: its status, refreshed every few seconds while it waits
  * or runs, then the result of the check (counts, errors per row, rombel
  * moves) with Simpan (confirmed), the error file and Batal. Every action
- * only calls ImportSiswaService. Needs the Import:Siswa permission.
+ * only calls ImportSiswaService, in the name of whoever presses it. Needs
+ * the Import:Siswa permission, checked when the page opens and again by
+ * every action when it is called; every holder sees every import, since
+ * operators take turns.
  */
 class ImportSiswaPage extends Page
 {
@@ -165,11 +168,12 @@ class ImportSiswaPage extends Page
         return [
             Action::make('unduhGalat')
                 ->label('Unduh file galat')
+                ->authorize(fn (): bool => self::pelaku()->can('import', Siswa::class))
                 ->icon(Heroicon::OutlinedArrowDownTray)
                 ->color('gray')
                 ->visible(fn (): bool => $this->importSiswa->path !== null && collect($this->importSiswa->galat ?? [])->contains(fn (array $galat): bool => $galat['baris'] !== null))
                 ->action(function (): ?BinaryFileResponse {
-                    $path = app(ImportSiswaService::class)->fileGalat($this->importSiswa);
+                    $path = app(ImportSiswaService::class)->fileGalat($this->importSiswa, self::pelaku());
 
                     if ($path === null) {
                         Notification::make()->danger()->title('File galat tidak tersedia.')->send();
@@ -177,10 +181,13 @@ class ImportSiswaPage extends Page
                         return null;
                     }
 
-                    return response()->download($path, 'galat-'.$this->importSiswa->nama_file)->deleteFileAfterSend();
+                    return response()
+                        ->download($path, 'galat-'.$this->importSiswa->nama_file, ['Content-Type' => ImportSiswaService::JENIS_XLSX])
+                        ->deleteFileAfterSend();
                 }),
             Action::make('simpan')
                 ->label('Simpan')
+                ->authorize(fn (): bool => self::pelaku()->can('import', Siswa::class))
                 ->icon(Heroicon::OutlinedCheck)
                 ->requiresConfirmation()
                 ->modalHeading('Simpan import?')
@@ -189,7 +196,7 @@ class ImportSiswaPage extends Page
                 ->visible(fn (): bool => $this->importSiswa->status === StatusImportSiswa::Siap)
                 ->action(function (): void {
                     try {
-                        $this->importSiswa = app(ImportSiswaService::class)->antrekanSimpan($this->importSiswa);
+                        $this->importSiswa = app(ImportSiswaService::class)->antrekanSimpan($this->importSiswa, self::pelaku());
                     } catch (PelanggaranAturanKesiswaan $exception) {
                         Notification::make()->danger()->title($exception->getMessage())->send();
                         $this->segarkan();
@@ -201,6 +208,7 @@ class ImportSiswaPage extends Page
                 }),
             Action::make('batal')
                 ->label('Batalkan import')
+                ->authorize(fn (): bool => self::pelaku()->can('import', Siswa::class))
                 ->icon(Heroicon::OutlinedXMark)
                 ->color('danger')
                 ->requiresConfirmation()
@@ -210,7 +218,7 @@ class ImportSiswaPage extends Page
                 ->visible(fn (): bool => in_array($this->importSiswa->status, [StatusImportSiswa::Menunggu, StatusImportSiswa::Bergalat, StatusImportSiswa::Siap], true))
                 ->action(function (): void {
                     try {
-                        $this->importSiswa = app(ImportSiswaService::class)->batal($this->importSiswa);
+                        $this->importSiswa = app(ImportSiswaService::class)->batal($this->importSiswa, self::pelaku());
                     } catch (PelanggaranAturanKesiswaan $exception) {
                         Notification::make()->danger()->title($exception->getMessage())->send();
                         $this->segarkan();

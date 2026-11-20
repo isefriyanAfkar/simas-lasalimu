@@ -69,11 +69,10 @@ final class AksiImportSiswa
                     return null;
                 }
 
-                $path = tempnam(sys_get_temp_dir(), 'template-import').'.xlsx';
-                app(TemplateImportSiswa::class)->simpan($tahunAjaran, $path);
+                $path = app(TemplateImportSiswa::class)->fileSementara($tahunAjaran);
 
                 return response()
-                    ->download($path, 'template-import-siswa-'.Str::slug($tahunAjaran->nama).'.xlsx')
+                    ->download($path, 'template-import-siswa-'.Str::slug($tahunAjaran->nama).'.xlsx', ['Content-Type' => ImportSiswaService::JENIS_XLSX])
                     ->deleteFileAfterSend();
             });
     }
@@ -135,7 +134,8 @@ final class AksiImportSiswa
             ->icon(Heroicon::OutlinedClock)
             ->color('warning')
             ->url(fn (): ?string => ($import = self::berjalan()) === null ? null : ImportSiswaPage::getUrl(['import' => $import]))
-            ->visible(fn (): bool => self::pelaku()->can('import', Siswa::class) && self::berjalan() !== null);
+            ->authorize(fn (): bool => self::pelaku()->can('import', Siswa::class))
+            ->visible(fn (): bool => self::berjalan() !== null);
     }
 
     private static function pilihTahunAjaran(): Select

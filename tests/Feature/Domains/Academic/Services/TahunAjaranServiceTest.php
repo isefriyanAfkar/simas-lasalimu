@@ -8,6 +8,8 @@ use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\TahunAjaranService;
 use App\Domains\Foundation\Models\User;
+use App\Domains\People\Enums\StatusImportSiswa;
+use App\Domains\People\Models\ImportSiswa;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -330,6 +332,22 @@ class TahunAjaranServiceTest extends TestCase
         $this->assertNull(TahunAjaran::query()->find($tahunAjaran->id));
         $this->assertSame(0, Semester::query()->where('tahun_ajaran_id', $tahunAjaran->id)->count());
         $this->assertSame(2, $lain->semester()->count());
+    }
+
+    public function test_a_school_year_used_by_a_student_import_cannot_be_deleted(): void
+    {
+        $tahunAjaran = $this->create('2026/2027', '2026-07-13', '2027-06-26');
+        ImportSiswa::factory()->for($tahunAjaran)->create(['status' => StatusImportSiswa::Dibatalkan, 'path' => null]);
+
+        try {
+            $this->service()->delete($tahunAjaran);
+            $this->fail('A school year with an import was deleted.');
+        } catch (PelanggaranAturanAkademik $exception) {
+            $this->assertSame('Tahun ajaran 2026/2027 sudah dipakai oleh 1 import siswa, jadi tidak bisa dihapus.', $exception->getMessage());
+        }
+
+        $this->assertNotNull(TahunAjaran::query()->find($tahunAjaran->id));
+        $this->assertSame(2, $tahunAjaran->semester()->count());
     }
 
     private function service(): TahunAjaranService

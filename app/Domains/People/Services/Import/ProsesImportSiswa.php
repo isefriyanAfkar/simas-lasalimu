@@ -51,7 +51,8 @@ use Spatie\Activitylog\Models\Activity;
  * Per row, in a savepoint that rolls back the whole row on any error:
  * 1. the student, found by NIS: created, or updated with the filled cells
  *    only (an empty cell never changes or clears anything; the status is
- *    never touched);
+ *    never touched). A filled name that is not the stored one (after
+ *    normalkanNama()) is an error: the NIS is likely mistyped;
  * 2. ayah, ibu, wali: see terapkanWali();
  * 3. the main contact (wali_utama, or by default the current one while it
  *    lives, else ayah, ibu, wali); a parent marked as died never becomes it;
@@ -274,6 +275,11 @@ final class ProsesImportSiswa
 
         if ($siswa === null) {
             return [$this->langkah(fn (): Siswa => $this->siswaService->create($pelaku, $isian), self::KOLOM_SISWA, null), true];
+        }
+
+        // A mistyped NIS would otherwise overwrite another student.
+        if ($nilai['nama'] !== null && self::normalkanNama((string) $nilai['nama']) !== self::normalkanNama($siswa->user->name)) {
+            throw new GalatBarisImport([['nis', "NIS {$siswa->nis} sudah dipakai siswa dengan nama lain. Periksa NIS, atau ubah nama lewat layar Siswa."]]);
         }
 
         $data = [...self::dataSiswaTersimpan($siswa), ...array_filter($isian, fn (mixed $isi): bool => $isi !== null)];
@@ -601,6 +607,8 @@ final class ProsesImportSiswa
             return [[], []];
         }
 
+        // The file was read before this lock: a rombel deleted meanwhile is
+        // missing here and is a row error.
         $rombel = Rombel::query()
             ->with('tahunAjaran')
             ->where('tahun_ajaran_id', $tahunAjaran->getKey())
@@ -608,6 +616,13 @@ final class ProsesImportSiswa
             ->lockForUpdate()
             ->get()
             ->keyBy('id');
+
+        foreach ($rencana as $nomor => $langkah) {
+            if (! $rombel->has($langkah['ke'])) {
+                $this->catat($nomor, 'rombel', 'Rombel ini baru saja dihapus. Pilih rombel lain, lalu unggah ulang file.');
+                unset($rencana[$nomor]);
+            }
+        }
 
         /** @var array<int, int> $isi */
         $isi = $rombel->map(fn (Rombel $item): int => $this->rombelSiswa->jumlahSiswaAktifTerkunci($item))->all();

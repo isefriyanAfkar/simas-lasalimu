@@ -56,6 +56,11 @@ Isi rencana:
 - **Rencana per nomor tugas:** file yang dibuat atau diubah, dan cara aturan
   CLAUDE.md dipenuhi.
 - **Daftar test:** satu baris per perilaku yang akan dibuktikan.
+- **Bagian yang tidak bisa test-dulu:** kalau untuk satu bagian test memang
+  tidak mungkin dijalankan dan dilihat gagal sebelum kodenya ditulis (lihat
+  tahap 3), sebutkan bagian itu dan alasannya di sini. Tulis "Tidak ada"
+  kalau memang tidak ada. Pengecualian yang baru disebut di laporan sesudahnya
+  tidak berlaku.
 - **Keputusan yang perlu diambil pengguna:** paling banyak empat. Tiap
   keputusan diberi pilihan dan usulan (beri tanda "usul saya").
 
@@ -86,6 +91,17 @@ Urutannya:
   Tulis test lebih dulu, jalankan sampai gagal karena alasan yang benar, lalu
   tulis kode secukupnya sampai lolos. Nilai yang diharapkan ditulis sebagai
   literal, bukan dihitung dengan kode yang sedang diuji.
+- **Wajib, untuk setiap perilaku baru** (termasuk perbaikan temuan tinjauan
+  dan tugas kecil): test-nya dijalankan dan **terlihat gagal karena alasan
+  yang benar** sebelum kodenya ditulis. "Alasan yang benar" berarti pesan
+  kegagalannya menunjuk perilaku yang belum ada, bukan galat ketik, fixture
+  yang salah, atau kelas yang belum dibuat. Catat kegagalan itu untuk
+  laporan. Kalau untuk satu bagian hal ini memang tidak mungkin, bagian itu
+  harus sudah disebut di rencana sebelum mulai (tahap 1), bukan baru di
+  laporan. Test yang hanya menambah cakupan untuk perilaku yang sudah ada
+  boleh langsung lolos; sebutkan sebagai cakupan, bukan perilaku baru.
+- **Uji mutasi** tetap dijalankan untuk aturan yang penting, tetapi bukan
+  pengganti test yang terlihat gagal lebih dulu.
 - **Composer:** jangan memotong keluarannya dengan pipa seperti `head` atau
   `tail`, karena bisa menghentikan instalasi di tengah jalan. Simpan
   keluarannya ke file kalau perlu disaring.

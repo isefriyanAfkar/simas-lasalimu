@@ -6,6 +6,7 @@ use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Foundation\Enums\Agama;
 use App\Domains\Foundation\Enums\JenisKelamin;
+use App\Domains\People\Services\ImportSiswaService;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
@@ -41,6 +42,18 @@ final class TemplateImportSiswa
         } finally {
             $spreadsheet->disconnectWorksheets();
         }
+    }
+
+    /**
+     * The template written to a new temporary file, whose path is returned;
+     * the caller deletes it (a download with deleteFileAfterSend()).
+     */
+    public function fileSementara(TahunAjaran $tahunAjaran): string
+    {
+        $path = ImportSiswaService::fileSementaraBaru('template-import');
+        $this->simpan($tahunAjaran, $path);
+
+        return $path;
     }
 
     public function buat(TahunAjaran $tahunAjaran): Spreadsheet

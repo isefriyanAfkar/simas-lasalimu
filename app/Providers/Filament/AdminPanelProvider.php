@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Domains\Foundation\Services\PengaturanSekolahService;
+use App\Domains\People\Services\ImportSiswaService;
 use App\Filament\Pages\Auth\EditProfile;
 use App\Filament\Pages\Auth\Login;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -14,8 +15,10 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
+use Illuminate\Contracts\View\View;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -63,6 +66,9 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            // While an import is checked or saved, saving accounts, students
+            // and parents waits for it: every page says so.
+            ->renderHook(PanelsRenderHook::CONTENT_START, fn (): View|string => app(ImportSiswaService::class)->sedangMemproses() ? view('filament.banner-import-berjalan') : '')
             ->plugins([
                 FilamentShieldPlugin::make(),
             ]);
