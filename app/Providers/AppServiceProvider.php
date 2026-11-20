@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Domains\Foundation\Policies\ActivityPolicy;
+use App\Domains\Foundation\Services\KunciSekaliPerTransaksi;
 use App\Filament\Support\GalatKonkurensi;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -25,5 +26,6 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Activity::class, ActivityPolicy::class);
         GalatKonkurensi::daftarkan();
+        KunciSekaliPerTransaksi::daftarkan();
     }
 }

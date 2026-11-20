@@ -15,6 +15,7 @@ use finfo;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -145,6 +146,12 @@ class UserService
     public const string PESAN_USERNAME_DICADANGKAN = 'Username ini dicadangkan untuk akun siswa atau wali.';
 
     public const string PESAN_NIK_TERDAFTAR = 'NIK ini sudah terdaftar di sistem.';
+
+    /**
+     * bcrypt cost for the random, never shown password of a new student or
+     * parent account (see kataSandiAcak()).
+     */
+    public const int BIAYA_HASH_KATA_SANDI_ACAK = 4;
 
     public const string PESAN_KUNCI_NIK_CARI = 'NIK belum bisa dicari: kunci NIK belum diatur di server.';
 
@@ -1222,6 +1229,25 @@ class UserService
      *
      * @throws ValidationException
      */
+    /**
+     * The random password of a new account without panel access. For a
+     * student or parent account it is hashed here at the cheapest bcrypt cost
+     * (BIAYA_HASH_KATA_SANDI_ACAK): 32 random characters that are never shown
+     * cannot be guessed whatever the cost, and an import creates hundreds of
+     * them (at the configured cost of 12 each hash takes about 0.2 s). The
+     * `hashed` cast keeps an already-hashed value whose cost is not above the
+     * configured one, and Laravel raises it at the first login
+     * (hashing.rehash_on_login). A staff account keeps the configured cost.
+     */
+    private function kataSandiAcak(Peran $peran): string
+    {
+        $kataSandi = Str::password(32);
+
+        return in_array($peran, [Peran::Siswa, Peran::Wali], true)
+            ? Hash::make($kataSandi, ['rounds' => self::BIAYA_HASH_KATA_SANDI_ACAK])
+            : $kataSandi;
+    }
+
     private function simpanAkunTanpaPanel(User $pelaku, ?User $user, array $data, Peran $peran, string $kunciLogPeran, Closure $aturPeran, bool $akunWali = false): User
     {
         if ($user !== null) {
@@ -1237,7 +1263,7 @@ class UserService
                     'name' => $data['name'],
                     'username' => $data['username'],
                     'email' => $data['email'] ?? null,
-                    'password' => Str::password(32),
+                    'password' => $this->kataSandiAcak($peran),
                     'status_aktif' => ! $akunWali,
                     ...Arr::only($data, self::BIODATA_FIELDS),
                 ]);
@@ -1436,10 +1462,13 @@ class UserService
     /**
      * Must run inside a transaction, before a username/email unique check,
      * so two concurrent saves are serialized instead of both passing it.
+     * Taken once per transaction (KunciSekaliPerTransaksi): an import saves
+     * many accounts in one transaction and would otherwise scan the growing
+     * table again for each.
      */
     private function lockUsers(): void
     {
-        User::query()->lockForUpdate()->get(['id']);
+        KunciSekaliPerTransaksi::kunci('users', fn () => User::query()->lockForUpdate()->get(['id']));
     }
 
     /**

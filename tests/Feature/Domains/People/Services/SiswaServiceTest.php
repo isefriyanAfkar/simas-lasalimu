@@ -13,6 +13,7 @@ use App\Domains\People\Services\SiswaService;
 use Closure;
 use Database\Seeders\PeranDanIzinSeeder;
 use Filament\Facades\Filament;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -442,6 +443,32 @@ class SiswaServiceTest extends TestCase
         foreach (Activity::query()->get() as $activity) {
             $this->assertStringNotContainsString(self::NIK, json_encode($activity->toArray()));
         }
+    }
+
+    /**
+     * An import saves many students in one transaction: the whole-table locks
+     * (all users, all students) are taken once, not once per student.
+     */
+    public function test_many_saves_in_one_transaction_lock_the_whole_tables_once(): void
+    {
+        $operator = User::factory()->operator()->create();
+        $kunciSemua = [];
+        $merekam = true;
+        DB::listen(function (QueryExecuted $query) use (&$kunciSemua, &$merekam): void {
+            if ($merekam && preg_match('/^select `id` from `(users|siswa)` for update$/', $query->sql, $cocok) === 1) {
+                $kunciSemua[] = $cocok[1];
+            }
+        });
+
+        DB::transaction(function () use ($operator): void {
+            $this->service()->create($operator, $this->data(['nis' => '20261001']));
+            $this->service()->create($operator, $this->data(['nis' => '20261002']));
+            $this->service()->create($operator, $this->data(['nis' => '20261003']));
+        });
+        $merekam = false;
+
+        $this->assertSame(['siswa', 'users'], $kunciSemua);
+        $this->assertSame(3, Siswa::query()->count());
     }
 
     private function service(): SiswaService

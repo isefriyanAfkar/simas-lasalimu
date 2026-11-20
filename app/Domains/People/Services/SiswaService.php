@@ -6,6 +6,7 @@ use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\PenempatanRombelService;
 use App\Domains\Foundation\Models\User;
 use App\Domains\Foundation\Services\KeunikanDatabase;
+use App\Domains\Foundation\Services\KunciSekaliPerTransaksi;
 use App\Domains\Foundation\Services\PelanggaranAturanPengguna;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\AksiKesiswaan;
@@ -345,11 +346,12 @@ class SiswaService
     }
 
     /**
-     * Must run inside a transaction, before the unique checks.
+     * Must run inside a transaction, before the unique checks. Taken once
+     * per transaction (KunciSekaliPerTransaksi), see UserService::lockUsers().
      */
     private function lockStudentRows(): void
     {
-        Siswa::query()->lockForUpdate()->get(['id']);
+        KunciSekaliPerTransaksi::kunci('siswa', fn () => Siswa::query()->lockForUpdate()->get(['id']));
     }
 
     private function lockStudentRow(Siswa $siswa): Siswa
