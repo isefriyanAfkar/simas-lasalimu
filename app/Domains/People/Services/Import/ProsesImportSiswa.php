@@ -72,6 +72,12 @@ use Spatie\Activitylog\Models\Activity;
 final class ProsesImportSiswa
 {
     /**
+     * A parent found by its NIK whose stored name is not the one in the file
+     * (after normalkanNama()). Names nobody.
+     */
+    public const string PESAN_NIK_NAMA_BERBEDA = 'NIK sudah terdaftar di sistem dengan nama yang berbeda. Kalau ini orang yang sama, samakan penulisan namanya dengan data di sistem (gunakan Cari NIK di layar Pengguna).';
+
+    /**
      * @var list<string>
      */
     private const array PERAN = ['ayah', 'ibu', 'wali'];
@@ -370,7 +376,7 @@ final class ProsesImportSiswa
      */
     private function calonWali(string $peran, array $blok): array
     {
-        $nama = self::samakan((string) $blok['nama']);
+        $nama = self::normalkanNama((string) $blok['nama']);
         $calon = [];
 
         if ($blok['nik'] !== null) {
@@ -381,8 +387,12 @@ final class ProsesImportSiswa
             }
 
             if ($pemilik !== null) {
-                if ($pemilik->waliMurid === null || self::samakan($pemilik->name) !== $nama) {
+                if ($pemilik->waliMurid === null) {
                     throw new GalatBarisImport([["{$peran}_nik", UserService::PESAN_NIK_ORANG_LAIN]]);
+                }
+
+                if (self::normalkanNama($pemilik->name) !== $nama) {
+                    throw new GalatBarisImport([["{$peran}_nik", self::PESAN_NIK_NAMA_BERBEDA]]);
                 }
 
                 $calon[$pemilik->waliMurid->getKey()] = $pemilik->waliMurid->setRelation('user', $pemilik);
@@ -396,7 +406,7 @@ final class ProsesImportSiswa
                 ->with('user')
                 ->whereHas('user', fn ($user) => $user->where('no_hp', $noHp))
                 ->get()
-                ->filter(fn (WaliMurid $wali): bool => self::samakan($wali->user->name) === $nama
+                ->filter(fn (WaliMurid $wali): bool => self::normalkanNama($wali->user->name) === $nama
                     && ($blok['nik'] === null || $wali->user->nik === null || $wali->user->nik === $blok['nik']));
 
             foreach ($sama as $wali) {
@@ -421,7 +431,7 @@ final class ProsesImportSiswa
         $user = $wali->user;
         $ubah = [];
 
-        if ($blok['nama'] !== null && self::samakan($blok['nama']) !== self::samakan($user->name)) {
+        if ($blok['nama'] !== null && self::normalkanNama($blok['nama']) !== self::normalkanNama($user->name)) {
             $ubah['name'] = $blok['nama'];
         }
 
@@ -879,7 +889,7 @@ final class ProsesImportSiswa
     {
         return match (true) {
             $blok['nik'] !== null => 'nik:'.$blok['nik'],
-            $blok['no_hp'] !== null && $blok['nama'] !== null => 'hp:'.UserService::normalisasiNoHp($blok['no_hp']).'|'.self::samakan($blok['nama']),
+            $blok['no_hp'] !== null && $blok['nama'] !== null => 'hp:'.UserService::normalisasiNoHp($blok['no_hp']).'|'.self::normalkanNama($blok['nama']),
             default => null,
         };
     }
@@ -890,6 +900,7 @@ final class ProsesImportSiswa
             'no_hp' => UserService::normalisasiNoHp((string) $nilai),
             'meninggal' => $nilai ? 'ya' : 'tidak',
             'nik' => (string) $nilai,
+            'nama' => self::normalkanNama((string) $nilai),
             default => self::samakan((string) $nilai),
         };
     }
@@ -903,7 +914,7 @@ final class ProsesImportSiswa
             return true;
         }
 
-        return $blok['nama'] === null || self::samakan($blok['nama']) === self::samakan($wali->user->name);
+        return $blok['nama'] === null || self::normalkanNama($blok['nama']) === self::normalkanNama($wali->user->name);
     }
 
     /**
@@ -958,7 +969,18 @@ final class ProsesImportSiswa
     }
 
     /**
-     * Collapse whitespace and ignore case, to compare names and jobs.
+     * The one form every parent name is compared in: case ignored, runs of
+     * whitespace collapsed, punctuation at the start and the end dropped.
+     * Titles are never guessed: "Ahmad, S.Pd." stays "ahmad, s.pd" and is
+     * not "ahmad".
+     */
+    public static function normalkanNama(string $nama): string
+    {
+        return self::samakan((string) preg_replace('/^[\p{P}\s\p{Z}]+|[\p{P}\s\p{Z}]+$/u', '', $nama));
+    }
+
+    /**
+     * Collapse whitespace and ignore case, to compare jobs.
      */
     private static function samakan(string $teks): string
     {

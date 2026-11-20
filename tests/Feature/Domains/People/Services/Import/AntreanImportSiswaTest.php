@@ -1,0 +1,320 @@
+<?php
+
+namespace Tests\Feature\Domains\People\Services\Import;
+
+use App\Domains\Academic\Enums\Tingkat;
+use App\Domains\Academic\Models\Rombel;
+use App\Domains\Academic\Models\TahunAjaran;
+use App\Domains\Foundation\Models\User;
+use App\Domains\People\Enums\StatusImportSiswa;
+use App\Domains\People\Models\ImportSiswa;
+use App\Domains\People\Models\Ptk;
+use App\Domains\People\Services\Import\BacaFileImportSiswa;
+use App\Domains\People\Services\Import\KolomImportSiswa;
+use App\Domains\People\Services\Import\PeriksaImportSiswa;
+use App\Domains\People\Services\Import\SimpanImportSiswa;
+use App\Domains\People\Services\ImportSiswaService;
+use App\Domains\People\Services\PelanggaranAturanKesiswaan;
+use Database\Seeders\PeranDanIzinSeeder;
+use Illuminate\Console\Scheduling\Event;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use RuntimeException;
+use Tests\TestCase;
+
+/**
+ * The import around its engine: the queued jobs (once, with a timeout, and
+ * gagal when they stop), one import per school year, the size limit, the
+ * scheduled worker and cleanup, and the error file.
+ *
+ * RefreshDatabase (not lazy): one test runs a real queue worker against
+ * the jobs table.
+ */
+class AntreanImportSiswaTest extends TestCase
+{
+    use MembuatFileImport, RefreshDatabase;
+
+    private const string NIK_GURU = '7404012345670009';
+
+    private User $operator;
+
+    private TahunAjaran $tahunAjaran;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Storage::fake('local');
+        $this->seed(PeranDanIzinSeeder::class);
+        $this->operator = User::factory()->operator()->create();
+        $this->tahunAjaran = TahunAjaran::factory()->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26', 'status_aktif' => true]);
+        Rombel::factory()->for($this->tahunAjaran)->create(['tingkat' => Tingkat::X, 'nomor' => 1]);
+    }
+
+    public function test_an_upload_queues_its_check_which_the_job_runs(): void
+    {
+        Queue::fake();
+
+        $import = $this->mulai();
+
+        Queue::assertPushed(PeriksaImportSiswa::class, fn (PeriksaImportSiswa $job): bool => $job->importId === $import->id);
+        $this->assertSame(StatusImportSiswa::Menunggu, $import->status);
+
+        app()->call([new PeriksaImportSiswa($import->id), 'handle']);
+
+        $this->assertSame(StatusImportSiswa::Siap, $import->fresh()?->status);
+    }
+
+    public function test_one_import_per_school_year_at_a_time(): void
+    {
+        Queue::fake();
+        $pertama = $this->mulai(nama: 'pertama.xlsx');
+        $path = $this->fileImport($this->tahunAjaran, [$this->baris()]);
+
+        try {
+            $this->service()->mulai($this->operator, $this->tahunAjaran, $path, 'kedua.xlsx');
+            $this->fail('Import kedua diterima.');
+        } catch (PelanggaranAturanKesiswaan $exception) {
+            $this->assertSame('Masih ada import untuk tahun ajaran 2026/2027 yang belum selesai (pertama.xlsx, Menunggu diperiksa). Buka import itu lalu simpan atau batalkan, sebelum mengunggah file baru.', $exception->getMessage());
+        }
+
+        $this->assertFalse(Storage::disk('local')->exists($path));
+
+        $lain = TahunAjaran::factory()->create(['nama' => '2027/2028', 'tanggal_mulai' => '2027-07-12', 'tanggal_selesai' => '2028-06-24']);
+        $this->service()->mulai($this->operator, $lain, $this->fileImport($lain, [$this->baris()]), 'lain.xlsx');
+
+        $this->service()->batal($pertama);
+        $kedua = $this->mulai(nama: 'kedua.xlsx');
+
+        $this->assertSame(StatusImportSiswa::Menunggu, $kedua->status);
+    }
+
+    public function test_a_file_above_the_size_limit_is_refused_and_deleted(): void
+    {
+        $path = ImportSiswaService::FOLDER.'/besar.xlsx';
+        Storage::disk('local')->put($path, str_repeat('x', ImportSiswaService::MAKS_UKURAN_KB * 1024 + 1));
+
+        try {
+            $this->service()->mulai($this->operator, $this->tahunAjaran, $path, 'besar.xlsx');
+            $this->fail('File terlalu besar diterima.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['file' => ['File terlalu besar: paling besar 2 MB. Bagi menjadi beberapa file, paling banyak 1000 baris per file.']], $exception->errors());
+        }
+
+        $this->assertFalse(Storage::disk('local')->exists($path));
+        $this->assertSame(0, ImportSiswa::query()->count());
+    }
+
+    public function test_saving_is_queued_once_and_the_job_saves(): void
+    {
+        Queue::fake();
+        $import = $this->service()->pratinjau($this->mulai());
+
+        $import = $this->service()->antrekanSimpan($import);
+
+        $this->assertSame(StatusImportSiswa::Menyimpan, $import->status);
+        Queue::assertPushed(SimpanImportSiswa::class, 1);
+
+        try {
+            $this->service()->antrekanSimpan($import);
+            $this->fail('Disimpan dua kali.');
+        } catch (PelanggaranAturanKesiswaan $exception) {
+            $this->assertSame('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.', $exception->getMessage());
+        }
+
+        app()->call([new SimpanImportSiswa($import->id), 'handle']);
+
+        $this->assertSame(StatusImportSiswa::Selesai, $import->fresh()?->status);
+
+        $bergalat = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Bergalat]);
+
+        try {
+            $this->service()->antrekanSimpan($bergalat);
+            $this->fail('Import bergalat diantrekan.');
+        } catch (PelanggaranAturanKesiswaan) {
+            $this->assertSame(StatusImportSiswa::Bergalat, $bergalat->fresh()?->status);
+        }
+
+        Queue::assertPushed(SimpanImportSiswa::class, 1);
+    }
+
+    public function test_the_jobs_run_once_with_a_timeout_below_the_queue_retry_after(): void
+    {
+        foreach ([new PeriksaImportSiswa(1), new SimpanImportSiswa(1)] as $job) {
+            $this->assertSame(1, $job->tries);
+            $this->assertSame(ImportSiswaService::BATAS_WAKTU_JOB, $job->timeout);
+            $this->assertTrue($job->failOnTimeout);
+        }
+
+        $this->assertGreaterThan(ImportSiswaService::BATAS_WAKTU_JOB, config('queue.connections.database.retry_after'));
+        $this->assertGreaterThan(config('queue.connections.database.retry_after'), ImportSiswaService::BATAS_MACET_DETIK);
+    }
+
+    public function test_a_failed_job_ends_the_import_as_failed(): void
+    {
+        Queue::fake();
+        $diperiksa = $this->mulai();
+        $diperiksa->update(['status' => StatusImportSiswa::Memeriksa, 'diproses_sejak' => now()]);
+
+        (new PeriksaImportSiswa($diperiksa->id))->failed(new RuntimeException('mati'));
+
+        $diperiksa->refresh();
+        $this->assertSame(StatusImportSiswa::Gagal, $diperiksa->status);
+        $this->assertSame(ImportSiswaService::PESAN_PERIKSA_GAGAL, $diperiksa->pesan);
+        $this->assertNull($diperiksa->path);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+
+        $disimpan = $this->mulai();
+        $disimpan->update(['status' => StatusImportSiswa::Menyimpan]);
+        (new SimpanImportSiswa($disimpan->id))->failed(null);
+        $this->assertSame(ImportSiswaService::PESAN_SIMPAN_GAGAL, $disimpan->fresh()?->pesan);
+
+        $selesai = ImportSiswa::factory()->for($this->tahunAjaran)->for($this->operator)->create(['status' => StatusImportSiswa::Selesai, 'path' => null]);
+        (new SimpanImportSiswa($selesai->id))->failed(null);
+        $this->assertSame(StatusImportSiswa::Selesai, $selesai->fresh()?->status);
+    }
+
+    /**
+     * A worker killed mid-job leaves the job reserved. Once retry_after has
+     * passed, the next worker finds it with its one attempt used up, fails it
+     * without running it again, and failed() ends the import as gagal.
+     */
+    public function test_a_job_whose_worker_was_killed_ends_the_import_as_failed(): void
+    {
+        config(['queue.default' => 'database']);
+        $import = $this->mulai();
+        $import->update(['status' => StatusImportSiswa::Memeriksa, 'diproses_sejak' => now()]);
+        DB::table('jobs')->update(['attempts' => 1, 'reserved_at' => now()->subSeconds(config('queue.connections.database.retry_after') + 60)->getTimestamp()]);
+
+        $this->artisan('queue:work', ['connection' => 'database', '--once' => true, '--sleep' => 0]);
+
+        $this->assertSame(StatusImportSiswa::Gagal, $import->fresh()?->status);
+        $this->assertDatabaseCount('jobs', 0);
+        $this->assertDatabaseCount('failed_jobs', 1);
+    }
+
+    public function test_the_cleanup_ends_stuck_and_abandoned_imports_and_deletes_leftover_files(): void
+    {
+        Queue::fake();
+        $lama = now()->subHours(25);
+        $macet = $this->importDengan(StatusImportSiswa::Memeriksa, ['diproses_sejak' => now()->subSeconds(ImportSiswaService::BATAS_MACET_DETIK + 60)]);
+        $berjalan = $this->importDengan(StatusImportSiswa::Menyimpan, ['diproses_sejak' => now()->subMinutes(10)]);
+        $tidakDiambil = $this->importDengan(StatusImportSiswa::Menunggu, ['updated_at' => $lama]);
+        $terlantar = $this->importDengan(StatusImportSiswa::Siap, ['updated_at' => $lama]);
+        $baru = $this->importDengan(StatusImportSiswa::Bergalat, []);
+        Storage::disk('local')->put('imports/sisa-lama.xlsx', 'x');
+        touch(Storage::disk('local')->path('imports/sisa-lama.xlsx'), $lama->getTimestamp());
+        Storage::disk('local')->put('imports/sisa-baru.xlsx', 'x');
+
+        $this->artisan('simas:bersihkan-import')
+            ->expectsOutputToContain('Import macet ditandai gagal: 2. Import terlantar dibatalkan: 1. File sisa dihapus: 1.')
+            ->assertSuccessful();
+
+        $this->assertSame([StatusImportSiswa::Gagal, ImportSiswaService::PESAN_MACET], [$macet->fresh()?->status, $macet->fresh()?->pesan]);
+        $this->assertSame(StatusImportSiswa::Menyimpan, $berjalan->fresh()?->status);
+        $this->assertSame([StatusImportSiswa::Gagal, ImportSiswaService::PESAN_ANTREAN_MATI], [$tidakDiambil->fresh()?->status, $tidakDiambil->fresh()?->pesan]);
+        $this->assertSame([StatusImportSiswa::Dibatalkan, ImportSiswaService::PESAN_TERLANTAR], [$terlantar->fresh()?->status, $terlantar->fresh()?->pesan]);
+        $this->assertSame(StatusImportSiswa::Bergalat, $baru->fresh()?->status);
+
+        $sisa = Storage::disk('local')->allFiles();
+        sort($sisa);
+        $harapan = ['imports/sisa-baru.xlsx', (string) $berjalan->path, (string) $baru->path];
+        sort($harapan);
+        $this->assertSame($harapan, $sisa);
+    }
+
+    public function test_the_scheduler_runs_the_worker_every_minute_without_overlap_and_the_cleanup(): void
+    {
+        $events = collect(app(Schedule::class)->events());
+
+        $worker = $events->first(fn (Event $event): bool => str_contains((string) $event->command, 'queue:work'));
+        $this->assertNotNull($worker);
+        $this->assertStringContainsString('--stop-when-empty', (string) $worker->command);
+        $this->assertStringContainsString('--timeout='.ImportSiswaService::BATAS_WAKTU_JOB, (string) $worker->command);
+        $this->assertSame('* * * * *', $worker->expression);
+        $this->assertTrue($worker->withoutOverlapping);
+        $this->assertGreaterThan(ImportSiswaService::BATAS_WAKTU_JOB / 60, $worker->expiresAt);
+
+        $bersihkan = $events->first(fn (Event $event): bool => str_contains((string) $event->command, 'simas:bersihkan-import'));
+        $this->assertNotNull($bersihkan);
+        $this->assertSame('*/5 * * * *', $bersihkan->expression);
+    }
+
+    public function test_the_error_file_marks_each_row_and_can_be_read_again(): void
+    {
+        Queue::fake();
+        $guru = Ptk::factory()->for(User::factory()->state(['name' => 'Hafida']))->create();
+        $guru->user->isiNik(self::NIK_GURU);
+        $guru->user->save();
+
+        $import = $this->service()->pratinjau($this->mulai([
+            $this->baris(['nis' => '20261001', 'nik' => self::NIK_GURU]),
+            $this->baris(['nis' => '20261002', 'nama' => 'Ani']),
+            $this->baris(['nis' => '20261003', 'nama' => 'Citra', 'jenis_kelamin' => null]),
+        ]));
+        $this->assertSame(StatusImportSiswa::Bergalat, $import->status);
+
+        $path = $this->service()->fileGalat($import);
+        $this->assertNotNull($path);
+        $spreadsheet = IOFactory::load($path);
+        $sheet = $spreadsheet->getSheetByName(KolomImportSiswa::LEMBAR_DATA);
+        $this->assertNotNull($sheet);
+        $kolom = count(KolomImportSiswa::KOLOM) + 1;
+
+        $this->assertSame(KolomImportSiswa::KOLOM_GALAT, $sheet->getCell([$kolom, 1])->getValue());
+        $this->assertSame('NIK siswa: NIK sudah terdaftar di sistem untuk orang lain.', $sheet->getCell([$kolom, 2])->getValue());
+        $this->assertNull($sheet->getCell([$kolom, 3])->getValue());
+        $this->assertStringStartsWith('Jenis kelamin: ', (string) $sheet->getCell([$kolom, 4])->getValue());
+        $this->assertSame('F8D7DA', $sheet->getStyle(KolomImportSiswa::huruf('nik').'2')->getFill()->getStartColor()->getRGB());
+        $this->assertStringNotContainsString('Hafida', (string) json_encode($sheet->toArray()));
+        $spreadsheet->disconnectWorksheets();
+
+        $baca = app(BacaFileImportSiswa::class)->baca($path, $this->tahunAjaran);
+        $this->assertSame([], $baca->galatFile);
+        $this->assertCount(3, $baca->baris);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>|null  $baris
+     */
+    private function mulai(?array $baris = null, string $nama = 'siswa.xlsx'): ImportSiswa
+    {
+        return $this->service()->mulai($this->operator, $this->tahunAjaran, $this->fileImport($this->tahunAjaran, $baris ?? [$this->baris()]), $nama);
+    }
+
+    /**
+     * @param  array<string, mixed>  $isi
+     * @return array<string, mixed>
+     */
+    private function baris(array $isi = []): array
+    {
+        return [...['nis' => '20261001', 'nama' => 'Budi', 'jenis_kelamin' => 'L', 'rombel' => 'X-1'], ...$isi];
+    }
+
+    /**
+     * An import of another school year (so they do not block each other)
+     * with its file, then the given columns written as they are.
+     *
+     * @param  array<string, mixed>  $kolom
+     */
+    private function importDengan(StatusImportSiswa $status, array $kolom): ImportSiswa
+    {
+        $tahun = 2040 + ImportSiswa::query()->count();
+        $tahunAjaran = TahunAjaran::factory()->create(['nama' => $tahun.'/'.($tahun + 1), 'tanggal_mulai' => "{$tahun}-07-01", 'tanggal_selesai' => ($tahun + 1).'-06-30']);
+        $import = ImportSiswa::factory()->for($tahunAjaran)->for($this->operator)->create(['status' => $status]);
+        Storage::disk('local')->put((string) $import->path, 'x');
+        ImportSiswa::query()->whereKey($import->id)->update($kolom);
+
+        return $import;
+    }
+
+    private function service(): ImportSiswaService
+    {
+        return app(ImportSiswaService::class);
+    }
+}

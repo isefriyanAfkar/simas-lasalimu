@@ -152,7 +152,82 @@ Ikuti langkah 3 sampai 6 di [pemasangan.md](pemasangan.md), dengan
 /opt/alt/php84/usr/bin/php artisan simas:buat-super-admin
 ```
 
-### 7. Periksa sebelum situs dibuka
+### 7. Cron untuk antrean dan pembersihan
+
+Import siswa diperiksa dan disimpan di antrean, bukan di permintaan web.
+Antrean dijalankan oleh **satu** cron yang memanggil penjadwal Laravel setiap
+menit. Penjadwal itu menjalankan:
+
+- `queue:work --stop-when-empty`: memproses job import, lalu berhenti saat
+  antrean kosong. Selama satu worker masih berjalan, menit berikutnya tidak
+  memulai worker kedua.
+- `simas:bersihkan-import`, setiap 5 menit: import yang macet ditandai gagal,
+  import yang 24 jam tidak dilanjutkan dibatalkan, dan file unggahan sisa
+  dihapus.
+
+**a. Isi `.env`.** Tambahkan, lalu jalankan `optimize`:
+
+```dotenv
+QUEUE_CONNECTION=database
+```
+
+Jangan isi `DB_QUEUE_RETRY_AFTER`. Bawaannya 1200 detik, dan nilai itu harus
+tetap di atas batas waktu job import (900 detik).
+
+**b. Cari path absolut folder aplikasi:**
+
+```bash
+cd ~/domains/<alamat>/app
+pwd
+```
+
+Hasilnya misalnya `/home/u123456789/domains/<alamat>/app`. Path itu dipakai
+utuh di baris cron; jangan pakai `~`.
+
+**c. Buat cron di hPanel** → Advanced → Cron Jobs, pilih **Custom**, jadwal
+setiap menit (`* * * * *`), dengan perintah:
+
+```bash
+/opt/alt/php84/usr/bin/php /home/u123456789/domains/<alamat>/app/artisan schedule:run >> /home/u123456789/domains/<alamat>/app/storage/logs/cron.log 2>&1
+```
+
+Ganti `/home/u123456789/domains/<alamat>/app` dengan hasil `pwd` di atas.
+Jangan pakai `php` saja: di cron, `php` adalah PHP 8.2 bawaan paket.
+
+**d. Pastikan cron benar-benar berjalan.**
+
+1. Lihat jadwalnya dikenali:
+
+   ```bash
+   /opt/alt/php84/usr/bin/php artisan schedule:list
+   ```
+
+   Harus ada `queue:work` (setiap menit) dan `simas:bersihkan-import`
+   (setiap 5 menit).
+2. Tunggu dua sampai tiga menit, lalu:
+
+   ```bash
+   tail -n 20 storage/logs/cron.log
+   ```
+
+   Setiap menit harus ada baris baru, misalnya `Running [...] queue:work` atau
+   `No scheduled commands are ready to run.` Kalau file kosong atau tidak
+   ada, periksa path PHP dan artisan di baris cron.
+3. Uji dari aplikasi: unggah file import. Dalam satu sampai dua menit status
+   harus berubah dari "Menunggu diperiksa". Halaman import memberi tahu kalau
+   setelah 3 menit belum diproses.
+
+Setelah yakin cron berjalan, log boleh dimatikan dengan mengganti bagian
+`>> .../cron.log 2>&1` menjadi `> /dev/null 2>&1`, supaya file log tidak
+terus membesar.
+
+**e. Batas waktu job.** Batas 900 detik per job hanya dipaksakan kalau
+ekstensi `pcntl` ada (`/opt/alt/php84/usr/bin/php -m | grep pcntl`). Tanpa
+`pcntl`, job yang tidak selesai ditandai gagal oleh `simas:bersihkan-import`
+setelah 30 menit. Data siswa tetap aman, karena simpan berjalan dalam satu
+transaksi.
+
+### 8. Periksa sebelum situs dibuka
 
 ```bash
 /opt/alt/php84/usr/bin/php artisan about

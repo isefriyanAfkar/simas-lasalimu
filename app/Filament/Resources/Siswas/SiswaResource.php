@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Siswas;
 use App\Domains\People\Models\Siswa;
 use App\Filament\Resources\Siswas\Pages\CreateSiswa;
 use App\Filament\Resources\Siswas\Pages\EditSiswa;
+use App\Filament\Resources\Siswas\Pages\ImportSiswaPage;
 use App\Filament\Resources\Siswas\Pages\ListSiswas;
 use App\Filament\Resources\Siswas\Pages\ViewSiswa;
 use App\Filament\Resources\Siswas\RelationManagers\WaliRelationManager;
@@ -58,6 +59,7 @@ class SiswaResource extends Resource
         return [
             'index' => ListSiswas::route('/'),
             'create' => CreateSiswa::route('/create'),
+            'import' => ImportSiswaPage::route('/import/{import}'),
             'view' => ViewSiswa::route('/{record}'),
             'edit' => EditSiswa::route('/{record}/edit'),
         ];

@@ -19,12 +19,14 @@ use App\Domains\People\Models\Siswa;
 use App\Domains\People\Models\SiswaWali;
 use App\Domains\People\Models\WaliMurid;
 use App\Domains\People\Services\Import\KolomImportSiswa;
+use App\Domains\People\Services\Import\ProsesImportSiswa;
 use App\Domains\People\Services\Import\TemplateImportSiswa;
 use App\Domains\People\Services\ImportSiswaService;
 use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -50,6 +52,8 @@ class ImportSiswaServiceTest extends TestCase
 
     private const string NIK_SISWA = '7404012345670005';
 
+    private const string PESAN_NAMA_BERBEDA = 'NIK sudah terdaftar di sistem dengan nama yang berbeda. Kalau ini orang yang sama, samakan penulisan namanya dengan data di sistem (gunakan Cari NIK di layar Pengguna).';
+
     private User $operator;
 
     private TahunAjaran $tahunAjaran;
@@ -63,6 +67,7 @@ class ImportSiswaServiceTest extends TestCase
         parent::setUp();
 
         Storage::fake('local');
+        Queue::fake();
         $this->seed(PeranDanIzinSeeder::class);
         $this->operator = User::factory()->operator()->create();
         $this->tahunAjaran = TahunAjaran::factory()->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26', 'status_aktif' => true]);
@@ -328,13 +333,43 @@ class ImportSiswaServiceTest extends TestCase
             $this->baris(['nis' => '20261002', 'nama' => 'Ani', 'jenis_kelamin' => 'P', 'ayah_nama' => 'Ahmad', 'ayah_no_hp' => '081234567890']),
         ]);
 
-        $this->assertSame(['2:ayah_nik' => ['NIK sudah terdaftar di sistem untuk orang lain.']], $this->galat($import));
+        $this->assertSame(['2:ayah_nik' => [self::PESAN_NAMA_BERBEDA]], $this->galat($import));
 
         $this->simpan([$this->baris(['nis' => '20261002', 'nama' => 'Ani', 'jenis_kelamin' => 'P', 'ayah_nama' => 'Ahmad', 'ayah_no_hp' => '081234567890'])]);
 
         $ani = Siswa::query()->where('nis', '20261002')->firstOrFail();
         $this->assertNotSame($bambang->id, $this->wali($ani, HubunganWali::Ayah)->wali_murid_id);
         $this->assertSame(3, WaliMurid::query()->count());
+    }
+
+    public function test_a_name_matches_whatever_its_case_spaces_or_outer_punctuation_but_a_title_is_not_guessed(): void
+    {
+        $ahmad = $this->waliAda('Ahmad', ['nik' => self::NIK_AYAH]);
+
+        $import = $this->simpan([
+            $this->baris(['nis' => '20261001', 'nama' => 'Budi', 'ayah_nama' => 'AHMAD', 'ayah_nik' => self::NIK_AYAH]),
+            $this->baris(['nis' => '20261002', 'nama' => 'Ani', 'jenis_kelamin' => 'P', 'ayah_nama' => 'Ahmad ', 'ayah_nik' => self::NIK_AYAH]),
+            $this->baris(['nis' => '20261003', 'nama' => 'Citra', 'jenis_kelamin' => 'P', 'ayah_nama' => '  ahmad.', 'ayah_nik' => self::NIK_AYAH]),
+        ]);
+
+        $this->assertSame(0, $import->ringkasan['wali_baru']);
+        $this->assertSame(3, SiswaWali::query()->where('wali_murid_id', $ahmad->id)->count());
+        $this->assertSame('Ahmad', $ahmad->user->fresh()?->name);
+
+        $import = $this->pratinjau([$this->baris(['nis' => '20261004', 'nama' => 'Dodi', 'ayah_nama' => 'Ahmad, S.Pd.', 'ayah_nik' => self::NIK_AYAH])]);
+
+        $this->assertSame(['2:ayah_nik' => [self::PESAN_NAMA_BERBEDA]], $this->galat($import));
+        $this->assertSame(0, Activity::query()->where('event', AksiPengguna::NikDicari->value)->count());
+    }
+
+    public function test_the_name_normalization(): void
+    {
+        $this->assertSame('ahmad', ProsesImportSiswa::normalkanNama('AHMAD'));
+        $this->assertSame('ahmad', ProsesImportSiswa::normalkanNama(' Ahmad '));
+        $this->assertSame('ahmad', ProsesImportSiswa::normalkanNama('"Ahmad".'));
+        $this->assertSame('siti aminah', ProsesImportSiswa::normalkanNama("Siti\u{00A0}  AMINAH"));
+        $this->assertSame('ahmad, s.pd', ProsesImportSiswa::normalkanNama('Ahmad, S.Pd.'));
+        $this->assertSame('dra. hafida', ProsesImportSiswa::normalkanNama('Dra. Hafida'));
     }
 
     public function test_a_new_parent_needs_a_name(): void
@@ -554,6 +589,7 @@ class ImportSiswaServiceTest extends TestCase
         $this->assertSame(['2:nis'], array_keys($this->galat($import)));
         $this->assertSame(0, $import->ringkasan['siswa_baru']);
 
+        $this->service()->batal($import);
         $spreadsheet = app(TemplateImportSiswa::class)->buat($this->tahunAjaran);
         $spreadsheet->getSheetByName(KolomImportSiswa::LEMBAR_DATA)?->setCellValue('A1', 'Nomor');
         $import = $this->service()->pratinjau($this->service()->mulai($this->operator, $this->tahunAjaran, $this->simpanFile($spreadsheet), 'lama.xlsx'));
@@ -578,6 +614,12 @@ class ImportSiswaServiceTest extends TestCase
      */
     private function import(array $baris): ImportSiswa
     {
+        // One import per school year: a test that uploads again first
+        // cancels the previous one that is not over, as the operator would.
+        foreach ($this->service()->belumBerakhir() as $sebelumnya) {
+            $this->service()->batal($sebelumnya);
+        }
+
         return $this->service()->mulai($this->operator, $this->tahunAjaran, $this->file($baris), 'siswa.xlsx');
     }
 

@@ -34,6 +34,12 @@ final class KolomImportSiswa
     public const string LEMBAR_PETUNJUK = 'Petunjuk';
 
     /**
+     * The column the error file adds (ImportSiswaService::fileGalat()). The
+     * reader ignores it, so a corrected error file can be uploaded again.
+     */
+    public const string KOLOM_GALAT = 'Keterangan galat';
+
+    /**
      * key => [header, kind].
      *
      * @var array<string, array{string, string}>

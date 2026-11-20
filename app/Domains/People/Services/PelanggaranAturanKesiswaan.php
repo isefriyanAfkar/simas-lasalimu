@@ -20,6 +20,11 @@ class PelanggaranAturanKesiswaan extends RuntimeException
         return new self('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.');
     }
 
+    public static function importLainBerjalan(string $tahunAjaran, string $namaFile, string $status): self
+    {
+        return new self("Masih ada import untuk tahun ajaran {$tahunAjaran} yang belum selesai ({$namaFile}, {$status}). Buka import itu lalu simpan atau batalkan, sebelum mengunggah file baru.");
+    }
+
     public static function importSudahBerakhir(): self
     {
         return new self('Import ini sudah tersimpan, dibatalkan, atau gagal. Unggah file lagi untuk import baru.');
