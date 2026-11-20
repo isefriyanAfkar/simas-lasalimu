@@ -233,15 +233,17 @@ tidak menyimpan apa pun.
 **f. Jalankan import di luar jam sibuk.** Selama satu import diperiksa atau
 disimpan, yang menunggu sampai import selesai adalah:
 
-- penyimpanan data siswa, wali murid, hubungan wali, dan penempatan rombel;
-- perubahan username, email, NIK, atau foto akun mana pun;
+- penyimpanan data siswa, wali murid, hubungan wali, penempatan rombel, dan
+  perubahan rombel;
+- setiap penyimpanan di layar Pengguna dan layar Guru/Staf, serta perubahan
+  profil sendiri (nama, nomor HP, alamat, foto);
 - masuk dan keluar untuk akun siswa atau wali yang **diubah** oleh import
   itu (barisnya di file berbeda dari data di sistem).
 
 Masuk dan keluar akun lain, termasuk dengan "Ingat saya", serta
 mengaktifkan, menonaktifkan, dan mengatur ulang kata sandi, tidak menunggu.
-Di laptop pengembang, 500 baris butuh sekitar 50 detik untuk pemeriksaan
-dan 50 detik untuk simpan; di server bersama bisa lebih lama. Selama itu
+Di laptop pengembang, 500 baris butuh sekitar 25 detik untuk pemeriksaan
+dan 25 detik untuk simpan; di server bersama bisa lebih lama. Selama itu
 setiap halaman panel menampilkan peringatan "Import siswa sedang
 diproses". Karena itu:
 

@@ -9,6 +9,22 @@ Kebutuhan server: PHP 8.4, Composer, MariaDB 11.8. Node dan `npm run build`
 
 Semua perintah dijalankan dari folder aplikasi.
 
+**Catatan MariaDB 11.6.2 ke atas.** Sejak versi itu `innodb_snapshot_isolation`
+bawaannya ON. Akibatnya, transaksi panjang yang mengubah baris yang baru saja
+diubah sesi lain ditolak dengan galat 1020 "Record has changed since last
+read". SIMAS menanganinya dua cara:
+
+- import siswa mematikan variabel itu hanya untuk sesinya sendiri selama
+  pemeriksaan dan simpan, lalu mengembalikan nilai semula. Dengan begitu,
+  mengatur ulang kata sandi atau menonaktifkan akun siswa di tengah import
+  tidak menggagalkan import, dan perubahan itu tidak tertimpa;
+- penyimpanan lain dicoba ulang otomatis. Kalau tetap gagal, layar
+  menampilkan "Sedang ada perubahan lain pada data ini. Coba lagi.".
+
+Tidak ada yang perlu diatur di server. MariaDB sebelum 11.6.2 dan MySQL tidak
+punya variabel itu dan memang selalu berperilaku seperti OFF. Untuk melihat
+nilainya: `SHOW VARIABLES LIKE 'innodb_snapshot_isolation';`
+
 ## Pemasangan pertama
 
 ### 1. Unduh dependensi

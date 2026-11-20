@@ -7,50 +7,61 @@ use RuntimeException;
 use Tests\TestCase;
 
 /**
- * The guard of DatabaseTerkomit: a test that commits and truncates never
- * runs against a database whose name does not end in _test, and stops
- * before connecting to it.
+ * The guard of DatabaseTerkomit: a test that commits and truncates runs only
+ * on a database whose name, as the connected server reports it (SELECT
+ * DATABASE()), ends in _test or _test_<number> (php artisan test --parallel).
+ * The configuration is not trusted: DB_URL wins over DB_DATABASE.
  */
 class PengamanDatabaseTerkomitTest extends TestCase
 {
-    public function test_a_database_not_ending_in_test_is_refused_before_connecting(): void
+    public function test_the_names_a_test_database_may_have(): void
     {
-        foreach (['simas_lasalimu', 'simas_lasalimu_test_lama', 'test', ''] as $nama) {
-            $koneksi = 'percobaan_'.md5($nama);
-            config(['database.connections.'.$koneksi => [...config('database.connections.'.config('database.default')), 'database' => $nama]]);
-
-            $pesan = null;
-
-            try {
-                DatabaseTerkomitPengujian::pastikanDatabaseTest($koneksi);
-            } catch (RuntimeException $exception) {
-                $pesan = $exception->getMessage();
-            }
-
-            $this->assertSame(
-                "Test ini meng-commit dan mengosongkan tabel, jadi hanya boleh berjalan di database yang namanya berakhiran _test. Koneksi {$koneksi} memakai database \"{$nama}\". Periksa DB_DATABASE di phpunit.xml.",
-                $pesan,
-                "Database \"{$nama}\" diterima.",
-            );
-            $this->assertArrayNotHasKey($koneksi, DB::getConnections());
+        foreach (['simas_lasalimu_test' => true, 'simas_lasalimu_test_3' => true, 'simas_lasalimu_test_12' => true,
+            'simas_lasalimu' => false, 'simas_lasalimu_test_lama' => false, 'simas_lasalimu_test_' => false, 'test' => false, '' => false] as $nama => $sah) {
+            $this->assertSame($sah, DatabaseTerkomitPengujian::namaDatabaseTest((string) $nama), (string) $nama);
         }
     }
 
-    public function test_a_database_ending_in_test_is_accepted(): void
+    public function test_the_connected_test_database_is_accepted(): void
     {
-        config(['database.connections.percobaan' => [...config('database.connections.'.config('database.default')), 'database' => 'simas_lasalimu_test']]);
+        DatabaseTerkomitPengujian::pastikanDatabaseTest((string) config('database.default'));
 
-        DatabaseTerkomitPengujian::pastikanDatabaseTest('percobaan');
+        $this->assertStringEndsWith('_test', (string) DB::selectOne('select database() as nama')->nama);
+    }
 
-        $this->assertSame('simas_lasalimu_test', config('database.connections.'.config('database.default').'.database'));
+    public function test_a_db_url_pointing_at_another_database_is_refused_whatever_the_configured_name(): void
+    {
+        $asal = config('database.connections.'.config('database.default'));
+        $url = sprintf(
+            '%s://%s:%s@%s:%s/information_schema',
+            $asal['driver'], rawurlencode((string) $asal['username']), rawurlencode((string) $asal['password']), $asal['host'], $asal['port'],
+        );
+        config(['database.connections.percobaan_url' => [...$asal, 'url' => $url, 'database' => 'simas_lasalimu_test']]);
+        $pesan = null;
+
+        try {
+            DatabaseTerkomitPengujian::pastikanDatabaseTest('percobaan_url');
+        } catch (RuntimeException $exception) {
+            $pesan = $exception->getMessage();
+        } finally {
+            DB::purge('percobaan_url');
+        }
+
+        $this->assertSame(
+            'Test ini meng-commit dan mengosongkan tabel, jadi hanya boleh berjalan di database yang namanya berakhiran _test atau _test_<angka>. Koneksi percobaan_url tersambung ke database "information_schema". Periksa DB_DATABASE dan DB_URL di phpunit.xml.',
+            $pesan,
+            'Database "information_schema" diterima.',
+        );
     }
 
     public function test_the_guard_runs_before_the_tables_are_truncated(): void
     {
+        $asal = config('database.default');
+        $koneksi = config('database.connections.'.$asal);
+        config(['database.connections.lain' => [...$koneksi, 'database' => 'information_schema']]);
+        config(['database.default' => 'lain']);
         $pengujian = new DatabaseTerkomitPengujian('pengujian');
         $pengujian->pasangAplikasi($this->app);
-        config(['database.connections.'.config('database.default').'.database' => 'simas_lasalimu']);
-
         $pesan = null;
 
         try {
@@ -58,10 +69,11 @@ class PengamanDatabaseTerkomitTest extends TestCase
         } catch (RuntimeException $exception) {
             $pesan = $exception->getMessage();
         } finally {
-            config(['database.connections.'.config('database.default').'.database' => 'simas_lasalimu_test']);
+            config(['database.default' => $asal]);
+            DB::purge('lain');
         }
 
-        $this->assertStringContainsString('memakai database "simas_lasalimu"', (string) $pesan, 'Pengosongan dimulai di database selain _test.');
+        $this->assertStringContainsString('tersambung ke database "information_schema"', (string) $pesan, 'Pengosongan dimulai di database selain _test.');
     }
 }
 

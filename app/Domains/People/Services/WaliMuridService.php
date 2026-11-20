@@ -152,6 +152,9 @@ class WaliMuridService
      */
     public function buat(User $pelaku, array $data): WaliMurid
     {
+        // Held already by every caller today; taken here too so a new
+        // caller cannot create a parent outside them.
+        KunciIdentitas::kunci(JenisKunciIdentitas::WaliMurid, JenisKunciIdentitas::Akun);
         $pekerjaan = $this->validasiPekerjaan($data);
         $user = $this->userService->simpanAkunWali($pelaku, null, Arr::only($data, self::FIELD_AKUN));
 
@@ -261,7 +264,7 @@ class WaliMuridService
 
     /**
      * Delete a parent linked to no student, together with the account. Lock
-     * order: W → users → R.
+     * order: wali_murid → akun (identity locks) → W → users → R.
      *
      * @throws PelanggaranAturanKesiswaan
      */

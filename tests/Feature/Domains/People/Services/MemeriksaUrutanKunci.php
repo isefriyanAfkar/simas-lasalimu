@@ -3,12 +3,16 @@
 namespace Tests\Feature\Domains\People\Services;
 
 use Closure;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 
 /**
  * Checks the lock order of a path through its SQL (one PHP thread cannot
- * stage two real transactions): the locking reads, in the order they run.
+ * stage two real transactions): the locking reads, and the UPDATE and
+ * DELETE of siswa, wali_murid, users and siswa_wali rows (a written row is
+ * held until the end of the transaction), in the order they run.
  *
  * The order: the identity lock rows (KunciIdentitas) siswa → wali_murid →
  * akun, then S (siswa rows) → W (wali_murid rows) → users rows → R
@@ -106,8 +110,34 @@ trait MemeriksaUrutanKunci
         $kunci = [];
         $merekam = true;
 
-        DB::listen(function (QueryExecuted $query) use (&$kunci, &$merekam): void {
-            if (! $merekam || preg_match('/(for update|lock in share mode)\s*$/i', $query->sql) !== 1 || preg_match('/\bfrom `(\w+)`/', $query->sql, $cocok) !== 1) {
+        /** @var array<string, list<int>> $dibuat */
+        $dibuat = [];
+
+        // A row this operation created is seen by no other transaction, so
+        // writing it again can wait on nobody.
+        Event::listen('eloquent.created: *', function (string $event, array $model) use (&$dibuat, &$merekam): void {
+            if ($merekam && ($model[0] ?? null) instanceof Model) {
+                $dibuat[$model[0]->getTable()][] = (int) $model[0]->getKey();
+            }
+        });
+
+        DB::listen(function (QueryExecuted $query) use (&$kunci, &$merekam, &$dibuat): void {
+            if (! $merekam) {
+                return;
+            }
+
+            // A write holds its row until the end of the transaction too.
+            if (preg_match('/^(?:update|delete from) `(siswa|wali_murid|users|siswa_wali)`/', $query->sql, $cocok) === 1) {
+                $barisBaru = preg_match('/ where `id` = \?$/', $query->sql) === 1 && in_array((int) end($query->bindings), $dibuat[$cocok[1]] ?? [], true);
+
+                if (! $barisBaru) {
+                    $kunci[] = $cocok[1];
+                }
+
+                return;
+            }
+
+            if (preg_match('/(for update|lock in share mode)\s*$/i', $query->sql) !== 1 || preg_match('/\bfrom `(\w+)`/', $query->sql, $cocok) !== 1) {
                 return;
             }
 

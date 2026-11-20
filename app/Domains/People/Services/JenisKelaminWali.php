@@ -18,8 +18,9 @@ final class JenisKelaminWali
      * An empty jenis_kelamin is filled in from such a relation; one that
      * contradicts it is a field error naming the student. Reads the
      * relations with a lock: in the lock order S → W → users → R this is the
-     * last step, so the caller must already hold the parent's and the users'
-     * locks it needs.
+     * last step, so the caller must already hold the identity locks, the
+     * parent's row and the parent's account row (UserService::update() locks
+     * the account row before calling this).
      *
      * @param  array<string, mixed>  $data
      * @return array{array<string, mixed>, array<string, list<string>>}

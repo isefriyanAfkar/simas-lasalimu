@@ -274,7 +274,7 @@ class UserServicePeranTest extends TestCase
 
     /**
      * Another super_admin changed the role between this page's load and its
-     * save: the role is read again after the user rows are locked.
+     * save: the role is read again after the account row is locked.
      */
     public function test_the_current_role_is_read_after_the_lock_not_from_the_loaded_relation(): void
     {

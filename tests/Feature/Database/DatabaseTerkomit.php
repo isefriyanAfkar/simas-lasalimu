@@ -13,7 +13,8 @@ use RuntimeException;
  * ones whose rows come from migrations.
  *
  * Every test using this trait or the second connection stops before
- * touching any database whose name does not end in _test.
+ * writing to, migrating or truncating a database whose name, as the
+ * connected server reports it, does not end in _test or _test_<number>.
  */
 trait DatabaseTerkomit
 {
@@ -29,16 +30,26 @@ trait DatabaseTerkomit
     protected array $exceptTables = ['kunci_identitas', 'status_kepegawaian', 'settings'];
 
     /**
-     * Stops the test unless the database of $koneksi (from the
-     * configuration, before any connection is made) ends in _test.
+     * Stops the test unless $koneksi is connected to a test database, as
+     * the server itself reports it (SELECT DATABASE()): the configuration is
+     * not trusted, DB_URL wins over DB_DATABASE. Only that read runs before
+     * the check; nothing is written.
      */
     public static function pastikanDatabaseTest(string $koneksi): void
     {
-        $nama = (string) config("database.connections.{$koneksi}.database");
+        $nama = (string) (DB::connection($koneksi)->selectOne('select database() as nama')->nama ?? '');
 
-        if (! str_ends_with($nama, '_test')) {
-            throw new RuntimeException("Test ini meng-commit dan mengosongkan tabel, jadi hanya boleh berjalan di database yang namanya berakhiran _test. Koneksi {$koneksi} memakai database \"{$nama}\". Periksa DB_DATABASE di phpunit.xml.");
+        if (! self::namaDatabaseTest($nama)) {
+            throw new RuntimeException("Test ini meng-commit dan mengosongkan tabel, jadi hanya boleh berjalan di database yang namanya berakhiran _test atau _test_<angka>. Koneksi {$koneksi} tersambung ke database \"{$nama}\". Periksa DB_DATABASE dan DB_URL di phpunit.xml.");
         }
+    }
+
+    /**
+     * Ends in _test, or in _test_<number> (php artisan test --parallel).
+     */
+    public static function namaDatabaseTest(string $nama): bool
+    {
+        return preg_match('/_test(?:_\d+)?$/', $nama) === 1;
     }
 
     protected function beforeTruncatingDatabase(): void

@@ -112,7 +112,7 @@ class UrutanKunciWaliTest extends TestCase
     {
         $user = $this->relasi(HubunganWali::Ayah, utama: true)->waliMurid->user;
 
-        $this->assertLockOrder(['kunci:akun', 'siswa_wali'], function () use ($user): void {
+        $this->assertLockOrder(['kunci:akun', 'users', 'siswa_wali'], function () use ($user): void {
             try {
                 app(UserService::class)->update(User::factory()->superAdmin()->create(), $user, [
                     'name' => $user->name,

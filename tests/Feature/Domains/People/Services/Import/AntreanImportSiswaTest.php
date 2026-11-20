@@ -9,6 +9,7 @@ use App\Domains\Foundation\Models\User;
 use App\Domains\People\Enums\StatusImportSiswa;
 use App\Domains\People\Models\ImportSiswa;
 use App\Domains\People\Models\Ptk;
+use App\Domains\People\Models\Siswa;
 use App\Domains\People\Services\Import\BacaFileImportSiswa;
 use App\Domains\People\Services\Import\KolomImportSiswa;
 use App\Domains\People\Services\Import\PeriksaImportSiswa;
@@ -19,6 +20,8 @@ use App\Domains\People\Services\PelanggaranAturanKesiswaan;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -416,6 +419,36 @@ class AntreanImportSiswaTest extends TestCase
     }
 
     /**
+     * One worker, one connection: a check job that dies with an exception
+     * ran with innodb_snapshot_isolation OFF, and the next job on the same
+     * connection finds the value the session had before.
+     */
+    public function test_the_next_job_on_the_worker_gets_the_session_value_back_after_an_import_job_failed(): void
+    {
+        config(['queue.default' => 'database']);
+        DB::statement('SET SESSION innodb_snapshot_isolation = ON');
+        $import = $this->mulai([$this->baris(['nis' => '20261009', 'nama' => 'Gagal'])]);
+        $selamaImport = null;
+
+        Siswa::creating(function () use (&$selamaImport): never {
+            $selamaImport = DB::selectOne("SHOW SESSION VARIABLES LIKE 'innodb_snapshot_isolation'")?->Value;
+
+            throw new RuntimeException('job mati di tengah jalan');
+        });
+        CatatIsolasiSnapshot::dispatch();
+        CatatIsolasiSnapshot::$nilai = null;
+
+        // A high memory limit: in a full test run this process is large, and the
+        // worker would stop after the first job, before the one that checks.
+        $this->artisan('queue:work', ['connection' => 'database', '--stop-when-empty' => true, '--sleep' => 0, '--memory' => 4096]);
+
+        $this->assertSame('OFF', $selamaImport);
+        $this->assertSame(StatusImportSiswa::Gagal, $import->fresh()?->status);
+        $this->assertSame('ON', CatatIsolasiSnapshot::$nilai);
+        $this->assertSame('ON', DB::selectOne("SHOW SESSION VARIABLES LIKE 'innodb_snapshot_isolation'")?->Value);
+    }
+
+    /**
      * The files in the system temporary folder that the error file or the
      * template could have made: their prefix, which tempnam() cuts to three
      * letters on Windows ("gal", "tem"). Other programs keep writing there,
@@ -475,5 +508,20 @@ class AntreanImportSiswaTest extends TestCase
     private function service(): ImportSiswaService
     {
         return app(ImportSiswaService::class);
+    }
+}
+
+/**
+ * A job that notes the innodb_snapshot_isolation of its session.
+ */
+final class CatatIsolasiSnapshot implements ShouldQueue
+{
+    use Queueable;
+
+    public static ?string $nilai = null;
+
+    public function handle(): void
+    {
+        self::$nilai = DB::selectOne("SHOW SESSION VARIABLES LIKE 'innodb_snapshot_isolation'")?->Value;
     }
 }

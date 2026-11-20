@@ -6,6 +6,7 @@ use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\PelanggaranAturanAkademik;
 use App\Domains\Academic\Services\PeriodeAkademik;
 use App\Domains\Foundation\Models\User;
+use App\Domains\Foundation\Services\IsolasiSnapshot;
 use App\Domains\Foundation\Services\UserService;
 use App\Domains\People\Enums\AksiKesiswaan;
 use App\Domains\People\Enums\StatusImportSiswa;
@@ -687,7 +688,10 @@ class ImportSiswaService
             return HasilImportSiswa::galatFile($baca->galatFile);
         }
 
-        return UserService::tanpaMenyebutPemilikNik(function () use ($import, $pelaku, $baca, $simpan): HasilImportSiswa {
+        // A password or status change of an account in the file, committed
+        // by someone else during the run, must not make it fail with
+        // "Record has changed since last read" (IsolasiSnapshot).
+        return IsolasiSnapshot::nonaktifkanSelama(fn (): HasilImportSiswa => UserService::tanpaMenyebutPemilikNik(function () use ($import, $pelaku, $baca, $simpan): HasilImportSiswa {
             DB::beginTransaction();
 
             try {
@@ -702,7 +706,7 @@ class ImportSiswaService
             $tetap ? DB::commit() : DB::rollBack();
 
             return $hasil;
-        });
+        }));
     }
 
     /**

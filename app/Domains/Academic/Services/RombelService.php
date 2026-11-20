@@ -5,7 +5,9 @@ namespace App\Domains\Academic\Services;
 use App\Domains\Academic\Enums\Tingkat;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
+use App\Domains\Foundation\Enums\JenisKunciIdentitas;
 use App\Domains\Foundation\Services\KeunikanDatabase;
+use App\Domains\Foundation\Services\KunciIdentitas;
 use App\Domains\Foundation\Settings\PengaturanSekolah;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -73,6 +75,10 @@ class RombelService
     public function update(Rombel $rombel, array $data): Rombel
     {
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): Rombel => DB::transaction(function () use ($rombel, $data): Rombel {
+            // The capacity check counts its active students under a shared
+            // lock on their rows (RombelSiswa): the siswa identity lock comes
+            // first, as for every path that locks student rows.
+            KunciIdentitas::kunci(JenisKunciIdentitas::Siswa);
             $rombel->update($this->validate($data, $rombel));
 
             return $rombel;

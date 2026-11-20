@@ -45,6 +45,7 @@ class GalatKonkurensiTest extends TestCase
         return [
             '1213 deadlock' => [1213, 'Deadlock found when trying to get lock; try restarting transaction'],
             '1205 lock wait timeout' => [1205, 'Lock wait timeout exceeded; try restarting transaction'],
+            '1020 record changed (MariaDB 11.6.2+ snapshot isolation)' => [1020, "Record has changed since last read in table 'users'; try restarting transaction"],
         ];
     }
 

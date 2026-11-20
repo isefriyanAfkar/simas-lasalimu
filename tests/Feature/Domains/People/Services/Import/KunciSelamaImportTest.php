@@ -20,6 +20,7 @@ use Closure;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -116,6 +117,54 @@ class KunciSelamaImportTest extends TestCase
         $this->assertFalse(User::query()->findOrFail($guru->id)->status_aktif);
         $this->assertSame('guru', User::query()->findOrFail($guru->id)->username);
         $this->assertSame(1, ImportSiswa::query()->count());
+    }
+
+    /**
+     * An operator resets the password of a student in the file and
+     * deactivates the account while the import runs, before the import
+     * reaches that row: the import still saves (MariaDB 11.6.2+ with
+     * innodb_snapshot_isolation ON would otherwise refuse the row with
+     * "Record has changed since last read"), and the operator's changes stay.
+     */
+    public function test_an_account_changed_by_someone_else_during_the_import_is_still_saved_without_losing_that_change(): void
+    {
+        Storage::fake('local');
+        Queue::fake();
+        $this->seed(PeranDanIzinSeeder::class);
+        $operator = User::factory()->operator()->create();
+        $superAdmin = User::factory()->superAdmin()->create();
+        $tahunAjaran = TahunAjaran::factory()->create(['nama' => '2026/2027', 'tanggal_mulai' => '2026-07-13', 'tanggal_selesai' => '2027-06-26', 'status_aktif' => true]);
+        Rombel::factory()->for($tahunAjaran)->create(['tingkat' => Tingkat::X, 'nomor' => 1]);
+        $fani = Siswa::factory()->for(User::factory()->state(['name' => 'Fani', 'jenis_kelamin' => JenisKelamin::Perempuan, 'alamat' => 'Jl. Lama']))->create(['nis' => '20261005']);
+
+        $service = app(ImportSiswaService::class);
+        $import = $service->pratinjau($service->mulai($operator, $tahunAjaran, $this->fileImport($tahunAjaran, [
+            ['nis' => '20261003', 'nama' => 'Eko', 'jenis_kelamin' => 'L', 'rombel' => 'X-1'],
+            ['nis' => '20261005', 'alamat' => 'Jl. Baru'],
+        ]), 'siswa.xlsx'));
+        $this->assertSame(StatusImportSiswa::Siap, $import->status, (string) json_encode($import->galat));
+        $kedua = $this->koneksiKedua();
+        DB::statement('SET SESSION innodb_snapshot_isolation = ON');
+
+        // Eko comes first: the import's transaction has read Fani's row
+        // already (the NIS lookup of the check run), and changes it after.
+        Siswa::created(function (Siswa $siswa) use ($kedua, $superAdmin, $fani): void {
+            if ($siswa->nis !== '20261003' || $this->hasil !== []) {
+                return;
+            }
+
+            $this->coba('atur ulang kata sandi Fani', $kedua, fn () => app(UserService::class)->resetPassword(User::query()->findOrFail($superAdmin->id), User::query()->findOrFail($fani->user_id), 'kata-sandi-baru-123'));
+            $this->coba('nonaktifkan Fani', $kedua, fn () => app(UserService::class)->deactivate(User::query()->findOrFail($superAdmin->id), User::query()->findOrFail($fani->user_id)));
+        });
+
+        $import = $service->simpan($import, $operator);
+
+        $this->assertSame(['atur ulang kata sandi Fani' => self::BERJALAN, 'nonaktifkan Fani' => self::BERJALAN], $this->hasil);
+        $this->assertSame(StatusImportSiswa::Selesai, $import->status, (string) $import->pesan);
+        $akun = User::query()->findOrFail($fani->user_id);
+        $this->assertSame('Jl. Baru', $akun->alamat);
+        $this->assertFalse($akun->status_aktif);
+        $this->assertTrue(Hash::check('kata-sandi-baru-123', $akun->password));
     }
 
     /**

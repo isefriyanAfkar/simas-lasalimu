@@ -7,6 +7,7 @@ use App\Domains\Academic\Models\PenempatanRombel;
 use App\Domains\Academic\Models\Rombel;
 use App\Domains\Academic\Models\TahunAjaran;
 use App\Domains\Academic\Services\PenempatanRombelService;
+use App\Domains\Academic\Services\RombelService;
 use App\Domains\Foundation\Enums\JenisKelamin;
 use App\Domains\Foundation\Enums\Peran;
 use App\Domains\Foundation\Models\User;
@@ -18,8 +19,10 @@ use App\Domains\People\Models\StatusKepegawaian;
 use App\Domains\People\Services\ImportSiswaService;
 use App\Domains\People\Services\PtkService;
 use App\Domains\People\Services\SiswaService;
+use App\Domains\People\Services\WaliMuridService;
 use Database\Seeders\PeranDanIzinSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Domains\People\Services\Import\MembuatFileImport;
@@ -73,6 +76,30 @@ class UrutanKunciIdentitasTest extends TestCase
         $this->assertIdentityLocks(['siswa'], fn () => $penempatan->tempatkan($this->operator, $budi, $x1));
         $this->assertIdentityLocks(['siswa'], fn () => $penempatan->pindahkan($this->operator, $budi->fresh(), $x2));
         $this->assertIdentityLocks(['siswa'], fn () => $penempatan->hapus($this->operator, PenempatanRombel::query()->where('siswa_id', $budi->id)->sole()));
+    }
+
+    public function test_changing_a_rombel_takes_the_student_lock_before_counting_its_students(): void
+    {
+        $rombel = Rombel::factory()->for($this->tahunAjaran)->create(['tingkat' => Tingkat::X, 'nomor' => 1, 'kapasitas' => 30]);
+        PenempatanRombel::factory()->for(Siswa::factory())->for($rombel)->create();
+
+        $this->assertIdentityLocks(['siswa'], fn () => app(RombelService::class)->update($rombel, [
+            'tahun_ajaran_id' => $this->tahunAjaran->id, 'tingkat' => 10, 'nomor' => 1, 'kapasitas' => 32,
+        ]));
+    }
+
+    public function test_creating_a_parent_takes_its_own_locks_whoever_calls_it(): void
+    {
+        $this->assertIdentityLocks(['wali_murid', 'akun'], fn () => DB::transaction(fn () => app(WaliMuridService::class)->buat($this->operator, [
+            'name' => 'Siti', 'jenis_kelamin' => 'perempuan',
+        ])));
+    }
+
+    public function test_changing_ones_own_profile_takes_the_account_lock_before_the_photo_check(): void
+    {
+        $guru = User::factory()->operator()->create();
+
+        $this->assertIdentityLocks(['akun'], fn () => app(UserService::class)->updateOwnProfile($guru, ['name' => 'Guru Baru']));
     }
 
     public function test_account_identity_writes_take_the_account_lock(): void

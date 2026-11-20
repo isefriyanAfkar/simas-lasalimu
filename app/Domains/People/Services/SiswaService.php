@@ -238,7 +238,7 @@ class SiswaService
     /**
      * Validate the account and the student fields together, so every error
      * is reported at once. The username sent to UserService is the NIS. Must
-     * run inside a transaction that locked the student rows first.
+     * run inside a transaction that took the siswa and akun identity locks first.
      *
      * @param  array<string, mixed>  $data
      * @return array{array{nis: string, nisn: string|null, tanggal_masuk: string|null, asal_sekolah: string|null}, array<string, mixed>}

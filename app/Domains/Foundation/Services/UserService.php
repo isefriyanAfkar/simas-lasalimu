@@ -276,6 +276,9 @@ class UserService
 
         return KeunikanDatabase::jaga(self::INDEKS_UNIK, fn (): User => DB::transaction(function () use ($pelaku, $user, $data): User {
             $data = $this->validateAccountData($data, $user);
+            // akun → users → R: the account row before the parent's
+            // relations (JenisKelaminWali) below.
+            $this->lockUser($user);
             $peran = $data['peran'] === null ? null : Peran::from($data['peran']);
 
             if ($user->siswa()->exists()) {
@@ -423,15 +426,19 @@ class UserService
     {
         $biodata = $this->prepareBiodata($data, self::PROFILE_BIODATA_FIELDS);
 
-        /** @var array{no_hp?: string|null, alamat?: string|null, foto?: string|null} $biodata */
-        $biodata = Validator::make(
-            $biodata,
-            Arr::only($this->biodataRules($user), array_keys($biodata)),
-            self::BIODATA_MESSAGES,
-            self::BIODATA_ATTRIBUTES,
-        )->validate();
-
         return DB::transaction(function () use ($user, $data, $biodata): User {
+            // The photo may belong to one account only: checked under the
+            // akun identity lock, like every other account save.
+            $this->lockUsers();
+
+            /** @var array{no_hp?: string|null, alamat?: string|null, foto?: string|null} $biodata */
+            $biodata = Validator::make(
+                $biodata,
+                Arr::only($this->biodataRules($user), array_keys($biodata)),
+                self::BIODATA_MESSAGES,
+                self::BIODATA_ATTRIBUTES,
+            )->validate();
+
             $fields = ['name', 'no_hp', 'alamat'];
             $before = $user->only($fields);
             $fotoBefore = $user->foto;
@@ -529,8 +536,8 @@ class UserService
      * Validate the account part of the staff form (PtkService), without
      * writing: name, username, email and every biodata rule, with
      * jenis_kelamin required. $user is the account being changed or linked,
-     * null for a new account. Must run inside a transaction (it locks the
-     * user rows). simpanAkunPtk() validates again before writing.
+     * null for a new account. Must run inside a transaction (it takes the
+     * akun identity lock). simpanAkunPtk() validates again before writing.
      *
      * @param  array<string, mixed>  $data
      *
@@ -586,7 +593,7 @@ class UserService
      * SiswaWaliService), without writing: only the name is required; the
      * biodata rules and NIK protection are the same. The username is set by
      * simpanAkunWali(), never taken from $data. Must run inside a transaction
-     * (it locks the user rows). A NIK held by someone else is named only for
+     * (it takes the akun identity lock). A NIK held by someone else is named only for
      * $pelaku with the Cari NIK permission (see pesanNikDipakaiUntukWali()).
      *
      * @param  array<string, mixed>  $data
@@ -948,8 +955,8 @@ class UserService
      * required) and update() (password not accepted here). The name is
      * trimmed and the username normalized first, like every other entry
      * point. The panel form checks the same rules for convenience; this is
-     * the check that counts. Must run inside a transaction (it locks the
-     * user rows before the unique checks).
+     * the check that counts. Must run inside a transaction (it takes the akun
+     * identity lock, KunciIdentitas, before the unique checks).
      *
      * Biodata (see the class docblock) is validated in the same pass, so the
      * form shows every error at once. Only the biodata keys present in $data

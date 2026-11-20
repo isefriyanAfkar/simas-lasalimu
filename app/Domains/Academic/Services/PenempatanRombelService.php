@@ -38,7 +38,8 @@ use Throwable;
  * - every change is logged explicitly (log "akademik", subject the
  *   student), with the rombel as "X-1 2026/2027"
  *
- * Every write locks the student row first and then the rombel row, the same
+ * Every write takes the siswa identity lock (KunciIdentitas), then locks
+ * the student row and then the rombel row, the same
  * order as SiswaService::aktifkanKembali(), so two writes for the same
  * student or into the same rombel run one after the other. The capacity is
  * enforced with a locking count (RombelSiswa::jumlahSiswaAktifTerkunci()):

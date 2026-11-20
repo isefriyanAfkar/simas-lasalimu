@@ -41,8 +41,8 @@ use Illuminate\Validation\ValidationException;
  * explicitly (log "kesiswaan", subject the student), without the NIK.
  *
  * Lock order, the same in every path that touches siswa_wali (see
- * KunciIdentitas): the identity locks siswa → wali_murid (→ akun when an
- * account is created), taken first, then S (student row) → W (parent row)
+ * KunciIdentitas): the identity locks siswa → wali_murid (→ akun when the
+ * path can write an account, as tambahkan() always can), taken first, then S (student row) → W (parent row)
  * → users (the parent's account) → R (siswa_wali rows).
  * WaliMuridService and Kelola Pengguna start further along the same order
  * (wali_murid → W → users → R, or akun → users → R) and never go back to an
@@ -164,7 +164,8 @@ class SiswaWaliService
     }
 
     /**
-     * Lock order: S → W and the parent's account → R.
+     * Lock order: siswa → wali_murid (identity locks) → S → W and the
+     * parent's account → R.
      *
      * @param  array{hubungan?: mixed}  $data
      *
@@ -210,8 +211,8 @@ class SiswaWaliService
     }
 
     /**
-     * Make $siswaWali the student's only main contact. Lock order: S → W and
-     * the parent's account → R.
+     * Make $siswaWali the student's only main contact. Lock order: siswa →
+     * wali_murid (identity locks) → S → W and the parent's account → R.
      *
      * @throws PelanggaranAturanKesiswaan
      * @throws ValidationException when a concurrent change made another one utama
@@ -256,7 +257,8 @@ class SiswaWaliService
     /**
      * Let a parent go from a student. The parent record and account stay
      * (WaliMuridService::hapus() deletes a parent without children). Lock
-     * order: S → W and the parent's account → R.
+     * order: siswa → wali_murid (identity locks) → S → W and the parent's
+     * account → R.
      *
      * @throws PelanggaranAturanKesiswaan
      */
