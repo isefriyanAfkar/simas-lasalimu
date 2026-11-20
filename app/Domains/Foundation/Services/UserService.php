@@ -105,6 +105,13 @@ class UserService
     private const int ATTEMPTS = 3;
 
     /**
+     * True while tanpaMenyebutPemilikNik() runs. Static because every
+     * service builds its own UserService; always restored by that method,
+     * also when its operation throws.
+     */
+    private static bool $tanpaNamaPemilikNik = false;
+
+    /**
      * Unique indexes whose violation (a save that slipped past the unique
      * rule) becomes a field error instead of a server error.
      *
@@ -146,6 +153,11 @@ class UserService
     public const string PESAN_USERNAME_DICADANGKAN = 'Username ini dicadangkan untuk akun siswa atau wali.';
 
     public const string PESAN_NIK_TERDAFTAR = 'NIK ini sudah terdaftar di sistem.';
+
+    /**
+     * The only NIK clash message while tanpaMenyebutPemilikNik() runs.
+     */
+    public const string PESAN_NIK_ORANG_LAIN = 'NIK sudah terdaftar di sistem untuk orang lain.';
 
     /**
      * bcrypt cost for the random, never shown password of a new student or
@@ -609,6 +621,29 @@ class UserService
     }
 
     /**
+     * Run $operasi with every NIK clash message reduced to
+     * PESAN_NIK_ORANG_LAIN, whoever the actor is: no name of whoever holds
+     * the NIK, and so no Cari NIK log entry either. For the student import,
+     * whose errors are stored and handed around as a file.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $operasi
+     * @return T
+     */
+    public static function tanpaMenyebutPemilikNik(Closure $operasi): mixed
+    {
+        $sebelumnya = self::$tanpaNamaPemilikNik;
+        self::$tanpaNamaPemilikNik = true;
+
+        try {
+            return $operasi();
+        } finally {
+            self::$tanpaNamaPemilikNik = $sebelumnya;
+        }
+    }
+
+    /**
      * Log that $pelaku was shown who holds a NIK (the parent form's NIK
      * message or duplicate warning), as a Cari NIK entry without the NIK.
      * Inside a transaction the entry is written after it ends, also when it
@@ -1018,9 +1053,15 @@ class UserService
                     return;
                 }
 
-                if ($pemilik !== null) {
-                    $fail($akunWali ? $this->pesanNikDipakaiUntukWali($pemilik, $pelaku) : 'NIK ini sudah terdaftar pada pengguna lain.');
+                if ($pemilik === null) {
+                    return;
                 }
+
+                $fail(match (true) {
+                    self::$tanpaNamaPemilikNik => self::PESAN_NIK_ORANG_LAIN,
+                    $akunWali => $this->pesanNikDipakaiUntukWali($pemilik, $pelaku),
+                    default => 'NIK ini sudah terdaftar pada pengguna lain.',
+                });
             }],
             'hapus_nik' => ['boolean'],
             'jenis_kelamin' => ['nullable', Rule::enum(JenisKelamin::class)],

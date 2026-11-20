@@ -33,9 +33,14 @@ class BiayaHashKataSandiAcakTest extends TestCase
         parent::setUp();
 
         $this->seed(PeranDanIzinSeeder::class);
+
+        // The first factory user hashes UserFactory's shared password, kept
+        // for the rest of the run, at the test cost; with the cost raised
+        // first, every later test would find a hash above its cost.
+        $this->operator = User::factory()->operator()->create();
+
         config(['hashing.bcrypt.rounds' => 12]);
         Hash::forgetDrivers();
-        $this->operator = User::factory()->operator()->create();
     }
 
     public function test_a_new_student_account_gets_the_cheap_hash(): void

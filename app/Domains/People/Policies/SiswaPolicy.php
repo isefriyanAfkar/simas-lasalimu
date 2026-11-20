@@ -71,6 +71,15 @@ class SiswaPolicy
         return $this->update($authUser, $siswa);
     }
 
+    /**
+     * Import students from an Excel file. Every row still goes through the
+     * student services, which check UserService::canManage per student.
+     */
+    public function import(User $authUser): bool
+    {
+        return $authUser->can('Import:Siswa');
+    }
+
     public function delete(User $authUser, Siswa $siswa): bool
     {
         return false;

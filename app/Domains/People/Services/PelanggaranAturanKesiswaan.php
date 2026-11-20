@@ -15,6 +15,16 @@ class PelanggaranAturanKesiswaan extends RuntimeException
         return new self('Siswa ini sudah tidak aktif. Aktifkan kembali dulu bila statusnya perlu diubah.');
     }
 
+    public static function importBelumSiap(): self
+    {
+        return new self('Import ini belum siap disimpan. Periksa file sampai tidak ada galat.');
+    }
+
+    public static function importSudahBerakhir(): self
+    {
+        return new self('Import ini sudah tersimpan, dibatalkan, atau gagal. Unggah file lagi untuk import baru.');
+    }
+
     public static function sudahAktif(): self
     {
         return new self('Siswa ini masih aktif.');

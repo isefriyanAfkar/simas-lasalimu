@@ -402,6 +402,36 @@ class SiswaWaliServiceTest extends TestCase
         }
     }
 
+    /**
+     * The import runs the services in this mode: nobody is named and no Cari
+     * NIK entry is written, whatever the operator may see. The mode ends
+     * with its operation, also when that throws.
+     */
+    public function test_without_naming_the_nik_holder_the_message_is_generic_and_nothing_is_logged(): void
+    {
+        $guru = User::factory()->create(['name' => 'Hafida']);
+        $guru->isiNik(self::NIK);
+        $guru->save();
+        Ptk::factory()->for($guru)->create();
+        $tambahkan = fn () => $this->service()->tambahkan($this->operator, $this->siswa('Budi'), $this->baru(['nik' => self::NIK]));
+
+        try {
+            UserService::tanpaMenyebutPemilikNik($tambahkan);
+            $this->fail('A staff NIK was taken.');
+        } catch (ValidationException $exception) {
+            $this->assertSame([UserService::PESAN_NIK_ORANG_LAIN], $exception->errors()['nik']);
+        }
+
+        $this->assertSame(0, Activity::query()->where('event', 'nik_dicari')->count());
+
+        try {
+            $tambahkan();
+            $this->fail('A staff NIK was taken.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['NIK ini milik guru/staf Hafida. Kosongkan NIK untuk data wali ini.'], $exception->errors()['nik']);
+        }
+    }
+
     public function test_the_nik_of_another_parent_suggests_choosing_that_parent(): void
     {
         $this->service()->tambahkan($this->operator, $this->siswa('Budi'), $this->baru(['name' => 'Ahmad', 'nik' => self::NIK]));

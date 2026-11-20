@@ -89,9 +89,10 @@ final class TemplateImportSiswa
             'Tanggal: tanggal Excel, atau teks hari-bulan-tahun, misalnya 31-12-2010.',
             'Jenis kelamin: L, P, Laki-laki, atau Perempuan.',
             "Rombel: pilih dari daftar rombel tahun ajaran {$tahunAjaran->nama}. Siswa yang sudah punya rombel lain di tahun ajaran itu akan dipindah, dan ini ditampilkan sebelum disimpan.",
-            'Ayah, ibu, dan wali: wali yang sudah ada dikenali dari NIK, atau dari nama dan nomor HP yang sama. Kakak-adik boleh memakai wali yang sama.',
+            'Ayah, ibu, dan wali: wali yang sudah ada dikenali dari NIK dan nama, atau dari nama dan nomor HP yang sama. Kakak-adik boleh memakai wali yang sama. Nama wajib diisi, kecuali untuk ayah atau ibu yang sudah tercatat pada siswa itu.',
+            'Ayah atau ibu yang sudah tercatat hanya diperbarui, tidak diganti orang lain. Mengganti ayah atau ibu dilakukan di layar Siswa.',
             'Ayah selalu laki-laki dan ibu selalu perempuan. Isi "Ayah meninggal" atau "Ibu meninggal" dengan ya atau tidak.',
-            'Wali utama: ayah, ibu, atau wali. Kalau kosong: ayah (kalau ada dan tidak meninggal), lalu ibu, lalu wali.',
+            'Wali utama: ayah, ibu, atau wali. Kalau kosong, wali utama yang sekarang tetap; siswa yang belum punya mendapat ayah (kalau tidak meninggal), lalu ibu, lalu wali.',
             sprintf('Paling banyak %d baris per file.', KolomImportSiswa::MAKS_BARIS),
             'Seluruh file diperiksa dulu. Tidak ada yang tersimpan sebelum semua baris benar; baris yang salah ditandai di file yang bisa diunduh.',
         ];

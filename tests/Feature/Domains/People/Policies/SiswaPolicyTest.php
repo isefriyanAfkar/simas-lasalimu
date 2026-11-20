@@ -29,6 +29,7 @@ class SiswaPolicyTest extends TestCase
         $this->assertTrue($operator->can('view', $siswa));
         $this->assertTrue($operator->can('create', Siswa::class));
         $this->assertTrue($operator->can('update', $siswa));
+        $this->assertTrue($operator->can('import', Siswa::class));
     }
 
     public function test_a_user_without_role_is_denied_everything(): void
@@ -40,6 +41,7 @@ class SiswaPolicyTest extends TestCase
         $this->assertFalse($user->can('view', $siswa));
         $this->assertFalse($user->can('create', Siswa::class));
         $this->assertFalse($user->can('update', $siswa));
+        $this->assertFalse($user->can('import', Siswa::class));
     }
 
     public function test_a_student_or_teacher_role_grants_nothing(): void
@@ -48,6 +50,7 @@ class SiswaPolicyTest extends TestCase
 
         $this->assertFalse($siswa->user->can('viewAny', Siswa::class));
         $this->assertFalse($siswa->user->can('update', $siswa));
+        $this->assertFalse($siswa->user->can('import', Siswa::class));
     }
 
     /**

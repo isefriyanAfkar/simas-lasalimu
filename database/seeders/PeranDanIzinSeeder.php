@@ -94,7 +94,8 @@ class PeranDanIzinSeeder extends Seeder
 
     /**
      * Students (Siswa). No Delete: students are never deleted, they leave
-     * with a status. Update also covers changing the status.
+     * with a status. Update also covers changing the status. Import covers
+     * the Excel import.
      *
      * @var list<string>
      */
@@ -103,6 +104,7 @@ class PeranDanIzinSeeder extends Seeder
         'View:Siswa',
         'Create:Siswa',
         'Update:Siswa',
+        'Import:Siswa',
     ];
 
     /**

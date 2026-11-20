@@ -61,6 +61,7 @@ class PenempatanRombelService
 
     /**
      * @throws PelanggaranAturanAkademik
+     * @throws PelanggaranAturanPengguna when $pelaku may not manage the student
      */
     public function tempatkan(User $pelaku, Siswa $siswa, Rombel $rombel): PenempatanRombel
     {
@@ -98,6 +99,7 @@ class PenempatanRombelService
      * Move a student to $rombel within the rombel's school year.
      *
      * @throws PelanggaranAturanAkademik
+     * @throws PelanggaranAturanPengguna when $pelaku may not manage the student
      */
     public function pindahkan(User $pelaku, Siswa $siswa, Rombel $rombel): PenempatanRombel
     {
