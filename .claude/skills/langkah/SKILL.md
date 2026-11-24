@@ -102,9 +102,12 @@ Urutannya:
   boleh langsung lolos; sebutkan sebagai cakupan, bukan perilaku baru.
 - **Uji mutasi** tetap dijalankan untuk aturan yang penting, tetapi bukan
   pengganti test yang terlihat gagal lebih dulu.
-- **Composer:** jangan memotong keluarannya dengan pipa seperti `head` atau
-  `tail`, karena bisa menghentikan instalasi di tengah jalan. Simpan
-  keluarannya ke file kalau perlu disaring.
+- **Composer:** jangan pernah mengalirkan keluarannya ke `head`, `tail`,
+  atau alat pemotong lain, dan jangan membuang stderr-nya, karena bisa
+  menghentikan instalasi di tengah jalan atau menyembunyikan galat. Kalau
+  keluarannya terlalu panjang, simpan seluruhnya ke file (`> file 2>&1`),
+  lalu baca bagian akhirnya. Aturan yang sama berlaku untuk perintah
+  verifikasi; lihat tahap 4.
 - **Membuat file:** pakai generator (`php artisan make:...`) dengan
   `--no-interaction`. Catat file mana yang dibuat generator atau paket dan
   mana yang ditulis tangan, karena keduanya masuk laporan.
@@ -132,6 +135,14 @@ vendor/bin/pint --test --format agent
 vendor/bin/phpstan analyse --memory-limit=1G
 ```
 
+- Jalankan keempat perintah itu **persis seperti tertulis**: tanpa pipa ke
+  `head`, `tail`, `grep`, atau alat pemotong lain, dan tanpa membuang stderr
+  (`2>/dev/null`, `2>$null`). Ringkasan dan daftar kegagalan ada di akhir
+  keluaran, dan pemotong bisa menghentikan proses di tengah. Kalau
+  keluarannya terlalu panjang, alihkan **seluruhnya** ke file
+  (`> file 2>&1`), lalu baca bagian akhir file itu. Verifikasi yang
+  keluarannya dipotong tidak sah dan harus diulang.
+- Laporkan baris ringkasan asli dari setiap perintah.
 - Baca keluaran setiap perintah. Kalau ada kegagalan, perbaiki penyebabnya,
   jangan menyembunyikannya (tanpa baseline atau `@phpstan-ignore`).
 - Cocokkan hasil kerja dengan setiap nomor tugas.
