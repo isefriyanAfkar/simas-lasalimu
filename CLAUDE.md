@@ -208,3 +208,9 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Skema hanya diubah lewat migration baru. Dilarang tanpa persetujuan:
   migrate:fresh, migrate:reset, db:wipe, menghapus kolom atau tabel, mengubah .env.
 - Satu tugas, satu commit. Berhenti dan laporkan setelah setiap tugas.
+- Riwayat git tidak pernah diubah. Dilarang, kecuali diminta secara
+  eksplisit di tugas itu: `git commit --amend`, `git rebase`, `git reset`
+  pada commit yang sudah ada, dan `git push --force`. Perbaikan atas commit
+  sebelumnya selalu dibuat sebagai commit baru.
+- Kalau instruksi tidak bisa diikuti persis, berhenti dan tanyakan. Jangan
+  memilih jalan lain sendiri.
