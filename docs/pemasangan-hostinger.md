@@ -184,15 +184,34 @@ pwd
 Hasilnya misalnya `/home/u123456789/domains/<alamat>/app`. Path itu dipakai
 utuh di baris cron; jangan pakai `~`.
 
-**c. Buat cron di hPanel** → Advanced → Cron Jobs, pilih **Custom**, jadwal
-setiap menit (`* * * * *`), dengan perintah:
+**c. Buat cron di hPanel** → Advanced → Cron Jobs. Isi formnya begini:
+
+- **Jenis:** pilih **Kustom**.
+- **Perintah:**
+
+  ```bash
+  /opt/alt/php84/usr/bin/php /home/u123456789/domains/<alamat>/app/artisan schedule:run
+  ```
+
+- **Pilihan Umum:** biarkan kosong.
+- **Kelima kolom jadwal** (menit, jam, hari, bulan, hari dalam minggu): di
+  setiap kolom pilih opsi bertanda `(*)`, artinya "setiap". Jadwal yang
+  tersimpan harus `* * * * *`.
+
+Ganti `/home/u123456789/domains/<alamat>/app` dengan hasil `pwd` di atas.
+Jangan pakai `php` saja: di cron, `php` adalah PHP 8.2 bawaan paket.
+
+Perintahnya **tanpa pengalihan keluaran**. Hostinger menangkap sendiri
+keluaran setiap cron, yang bisa dilihat lewat tombol **Lihat Output** di
+daftar Cron Jobs. Pengalihan ke `storage/logs/cron.log` tidak menghasilkan
+apa-apa di Hostinger.
+
+Untuk hosting lain yang tidak menangkap keluaran cron, pakai versi dengan
+pengalihan ke file:
 
 ```bash
 /opt/alt/php84/usr/bin/php /home/u123456789/domains/<alamat>/app/artisan schedule:run >> /home/u123456789/domains/<alamat>/app/storage/logs/cron.log 2>&1
 ```
-
-Ganti `/home/u123456789/domains/<alamat>/app` dengan hasil `pwd` di atas.
-Jangan pakai `php` saja: di cron, `php` adalah PHP 8.2 bawaan paket.
 
 **d. Pastikan cron benar-benar berjalan.**
 
@@ -204,22 +223,30 @@ Jangan pakai `php` saja: di cron, `php` adalah PHP 8.2 bawaan paket.
 
    Harus ada `queue:work` (setiap menit) dan `simas:bersihkan-import`
    (setiap 5 menit).
-2. Tunggu dua sampai tiga menit, lalu:
-
-   ```bash
-   tail -n 20 storage/logs/cron.log
-   ```
-
-   Setiap menit harus ada baris baru, misalnya `Running [...] queue:work` atau
-   `No scheduled commands are ready to run.` Kalau file kosong atau tidak
-   ada, periksa path PHP dan artisan di baris cron.
+2. Tunggu dua sampai tiga menit, lalu tekan **Lihat Output** pada cron itu
+   di daftar Cron Jobs. Harus ada baris `Running [...] queue:work`. Kalau
+   kosong atau berisi galat, periksa path PHP dan artisan di perintah cron.
 3. Uji dari aplikasi: unggah file import. Dalam satu sampai dua menit status
    harus berubah dari "Menunggu diperiksa". Halaman import memberi tahu kalau
    setelah 3 menit belum diproses.
 
-Setelah yakin cron berjalan, log boleh dimatikan dengan mengganti bagian
-`>> .../cron.log 2>&1` menjadi `> /dev/null 2>&1`, supaya file log tidak
-terus membesar.
+**Arti "Has Mutex" di `schedule:list`.** Tanda ini muncul di baris
+`queue:work` selama sebuah worker sedang berjalan. Selama tanda itu ada,
+penjadwal tidak memulai worker kedua. Ini wajar dan tidak perlu diapa-apakan.
+
+Kalau worker dihentikan paksa oleh hosting, tanda itu tertinggal, tetapi
+kedaluwarsa sendiri setelah 30 menit, sama dengan batas import macet.
+Sesudah itu, menit berikutnya memulai worker baru. Untuk menghapusnya lebih
+cepat:
+
+```bash
+/opt/alt/php84/usr/bin/php artisan schedule:clear-cache
+```
+
+Jalankan perintah ini hanya kalau tidak ada import yang sedang diproses,
+yaitu peringatan "Import siswa sedang diproses" tidak tampil di panel.
+Perintah ini menghapus tanda semua jadwal, juga milik worker yang masih
+berjalan, sehingga menit berikutnya bisa memulai worker kedua.
 
 **e. Batas waktu job.** Batas 900 detik per job hanya dipaksakan kalau
 ekstensi `pcntl` ada (`/opt/alt/php84/usr/bin/php -m | grep pcntl`). Tanpa

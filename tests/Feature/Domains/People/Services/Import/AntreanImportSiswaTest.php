@@ -250,6 +250,16 @@ class AntreanImportSiswaTest extends TestCase
         $this->assertSame('*/5 * * * *', $bersihkan->expression);
     }
 
+    public function test_the_worker_lock_expires_after_30_minutes_like_a_stuck_import(): void
+    {
+        $worker = collect(app(Schedule::class)->events())
+            ->first(fn (Event $event): bool => str_contains((string) $event->command, 'queue:work'));
+
+        $this->assertNotNull($worker);
+        $this->assertSame(30, $worker->expiresAt);
+        $this->assertSame(30 * 60, ImportSiswaService::BATAS_MACET_DETIK);
+    }
+
     public function test_the_error_file_marks_each_row_and_can_be_read_again(): void
     {
         Queue::fake();

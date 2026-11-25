@@ -14,12 +14,13 @@ Artisan::command('inspire', function () {
  * docs/pemasangan-hostinger.md). It starts the queue worker, which handles
  * the queued import jobs and stops when the queue is empty; while one
  * worker still runs, the next minute starts none. The mutex expires after
- * 60 minutes, so a worker killed by the server never blocks the queue for
+ * BATAS_MACET_DETIK (30 minutes), the same limit after which an import is
+ * marked stuck, so a worker killed by the server never blocks the queue for
  * longer than that.
  */
 Schedule::command('queue:work', ['--stop-when-empty', '--tries=1', '--timeout='.ImportSiswaService::BATAS_WAKTU_JOB])
     ->everyMinute()
-    ->withoutOverlapping(60)
+    ->withoutOverlapping(intdiv(ImportSiswaService::BATAS_MACET_DETIK, 60))
     ->runInBackground();
 
 Schedule::command('simas:bersihkan-import')
