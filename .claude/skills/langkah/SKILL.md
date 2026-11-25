@@ -133,8 +133,19 @@ vendor/bin/pint --dirty --format agent
 php artisan test --parallel --processes=4 --compact
 vendor/bin/pint --test --format agent
 vendor/bin/phpstan analyse --memory-limit=1G
+composer audit --no-interaction
 ```
 
+- **`composer audit`** dijalankan di setiap verifikasi, juga untuk tugas
+  yang tidak menyentuh Composer, karena advisory baru bisa terbit kapan
+  saja. Baris ringkasannya dilaporkan apa adanya, misalnya "No security
+  vulnerability advisories found." Advisory apa pun yang muncul membuat
+  tugas **berhenti untuk diputuskan pengguna**, sebelum commit. Advisory
+  tidak diabaikan, tidak dibisukan dengan `audit.ignore`, dan tidak
+  diperbaiki sendiri. Laporkan isinya (ID, tingkat keparahan, versi
+  terdampak dan versi perbaikan), paket mana yang memintanya, dan apakah
+  kode yang rentan terjangkau dari SIMAS. Paket yang ditandai ditinggalkan
+  (abandoned) diperlakukan sama.
 - **Test paralel** (paratest, 4 proses; angka 4 hasil pengukuran di laptop
   pengembang: tercepat, dan proses lebih banyak tidak mempercepat lagi).
   Setiap proses memakai database `simas_lasalimu_test_test_<n>` dan folder
@@ -150,7 +161,7 @@ vendor/bin/phpstan analyse --memory-limit=1G
   kembali ke lari berurutan: cari sumber daya yang dipakai bersama
   (database, folder, cache, angka acak) dan pisahkan.
 
-- Jalankan keempat perintah itu **persis seperti tertulis**: tanpa pipa ke
+- Jalankan kelima perintah itu **persis seperti tertulis**: tanpa pipa ke
   `head`, `tail`, `grep`, atau alat pemotong lain, dan tanpa membuang stderr
   (`2>/dev/null`, `2>$null`). Ringkasan dan daftar kegagalan ada di akhir
   keluaran, dan pemotong bisa menghentikan proses di tengah. Kalau
@@ -183,7 +194,7 @@ Pakai format ini setiap kali, supaya pengguna bisa membandingkan antartugas:
 **<Langkah N> selesai, commit `<sha>` "<pesan>".** <satu kalimat status>
 
 **Hasil pemeriksaan**
-<keluaran php artisan test, pint --test, dan phpstan, apa adanya>
+<keluaran php artisan test, pint --test, phpstan, dan composer audit, apa adanya>
 
 **`git log --oneline`**
 <10 baris terakhir>
