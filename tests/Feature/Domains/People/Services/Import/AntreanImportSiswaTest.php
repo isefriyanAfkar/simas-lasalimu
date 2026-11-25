@@ -260,6 +260,16 @@ class AntreanImportSiswaTest extends TestCase
         $this->assertSame(30 * 60, ImportSiswaService::BATAS_MACET_DETIK);
     }
 
+    public function test_the_cleanup_lock_expires_after_10_minutes(): void
+    {
+        $bersihkan = collect(app(Schedule::class)->events())
+            ->first(fn (Event $event): bool => str_contains((string) $event->command, 'simas:bersihkan-import'));
+
+        $this->assertNotNull($bersihkan);
+        $this->assertTrue($bersihkan->withoutOverlapping);
+        $this->assertSame(10, $bersihkan->expiresAt);
+    }
+
     public function test_the_error_file_marks_each_row_and_can_be_read_again(): void
     {
         Queue::fake();
