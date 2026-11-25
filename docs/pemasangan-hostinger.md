@@ -170,9 +170,22 @@ sistem. Yang disimpan di sana: file galat import yang diunduh operator
 (bisa berisi NIK), template import, dan file contoh import. Folder temp
 sistem dipakai bersama situs lain di hosting ini, jadi tidak dipakai.
 Folder `tmp` dibuat otomatis saat pertama dibutuhkan dan tidak masuk git.
-Setiap file dihapus begitu selesai diunduh. Unduhan yang terputus
-meninggalkan file, dan file seperti itu dihapus oleh `simas:bersihkan-import`
-setelah 1 hari.
+
+- File galat dan template dihapus begitu dikirim ke browser, juga kalau
+  unduhan terputus di tengah jalan.
+- File contoh import dihapus begitu disalin ke folder import.
+- File yang gagal ditulis langsung dihapus.
+- Sebuah file hanya tertinggal kalau proses PHP mati di antara pembuatan
+  dan pengirimannya. File seperti itu dihapus oleh `simas:bersihkan-import`
+  setelah 1 hari.
+
+Folder `tmp` dibuat dengan izin `0700`, yaitu hanya bisa dibaca dan ditulis
+oleh pengguna yang membuatnya. Di Hostinger, PHP untuk web dan cron
+berjalan sebagai pengguna akun yang sama, jadi ini tidak masalah. Di server
+yang pengguna cron atau SSH-nya berbeda dari pengguna web (misalnya VPS),
+pastikan folder `storage/app/private/tmp` dimiliki pengguna web. Kalau
+tidak, unduhan file galat dan template gagal dengan pesan "Tidak bisa
+membuat file sementara".
 
 **a. Isi `.env`.** Tambahkan, lalu jalankan `optimize`:
 

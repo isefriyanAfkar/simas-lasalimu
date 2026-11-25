@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use RuntimeException;
 use Spatie\Activitylog\Models\Activity;
 use Tests\TestCase;
@@ -381,6 +382,42 @@ class AntreanImportSiswaTest extends TestCase
         $this->assertSame(1, ImportSiswa::query()->count());
     }
 
+    public function test_an_error_file_that_cannot_be_written_is_deleted_at_once(): void
+    {
+        Queue::fake();
+        $import = $this->service()->pratinjau($this->mulai([$this->baris(['jenis_kelamin' => null])]));
+        $sebelum = $this->fileSementara();
+        IOFactory::registerWriter('Xlsx', PenulisXlsxGagal::class);
+
+        try {
+            $this->service()->fileGalat($import, $this->operator);
+            $this->fail('File galat yang gagal ditulis dianggap jadi.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame(PenulisXlsxGagal::PESAN, $exception->getMessage());
+        } finally {
+            IOFactory::registerWriter('Xlsx', Xlsx::class);
+        }
+
+        $this->assertEqualsCanonicalizing($sebelum, $this->fileSementara());
+    }
+
+    public function test_a_template_that_cannot_be_written_is_deleted_at_once(): void
+    {
+        $sebelum = $this->fileSementara();
+        IOFactory::registerWriter('Xlsx', PenulisXlsxGagal::class);
+
+        try {
+            app(TemplateImportSiswa::class)->fileSementara($this->tahunAjaran);
+            $this->fail('Template yang gagal ditulis dianggap jadi.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame(PenulisXlsxGagal::PESAN, $exception->getMessage());
+        } finally {
+            IOFactory::registerWriter('Xlsx', Xlsx::class);
+        }
+
+        $this->assertEqualsCanonicalizing($sebelum, $this->fileSementara());
+    }
+
     public function test_the_error_file_and_the_template_leave_no_other_temporary_file(): void
     {
         Queue::fake();
@@ -526,6 +563,22 @@ class AntreanImportSiswaTest extends TestCase
     private function service(): ImportSiswaService
     {
         return app(ImportSiswaService::class);
+    }
+}
+
+/**
+ * An xlsx writer that writes part of the file, then fails: a full disk or
+ * a server that stops the write.
+ */
+final class PenulisXlsxGagal extends Xlsx
+{
+    public const string PESAN = 'Disk penuh.';
+
+    public function save($filename, int $flags = 0): void
+    {
+        file_put_contents((string) $filename, 'sebagian');
+
+        throw new RuntimeException(self::PESAN);
     }
 }
 

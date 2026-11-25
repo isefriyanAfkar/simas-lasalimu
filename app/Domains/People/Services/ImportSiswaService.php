@@ -407,8 +407,10 @@ class ImportSiswaService
      * - siap or bergalat, untouched for BATAS_TERLANTAR_JAM: dibatalkan;
      * - a file in FOLDER older than BATAS_TERLANTAR_JAM that no import still
      *   uses: deleted;
-     * - a file in folderSementara() older than BATAS_TERLANTAR_JAM (a
-     *   download that never finished, so it was never deleted): deleted.
+     * - a file in folderSementara() older than BATAS_TERLANTAR_JAM: deleted.
+     *   A download deletes its file once sent, even when the connection
+     *   drops; a file stays only when the request died between making and
+     *   sending it.
      * Each import is ended only while it still has the status it was found
      * with: one that moved on meanwhile is left alone and not counted.
      *
@@ -471,7 +473,9 @@ class ImportSiswaService
      * the import has no row error or its file is gone. Only the operator's
      * own cells and the stored messages, which hold no NIK and no name of a
      * NIK holder. Every file made is logged in the name of $pelaku (the
-     * import and when, never the content).
+     * import and when, never the content). A file that fails while being
+     * written is deleted at once, because a half-written one can still hold
+     * NIKs.
      */
     public function fileGalat(ImportSiswa $import, User $pelaku): ?string
     {
@@ -526,7 +530,14 @@ class ImportSiswaService
             }
 
             $path = self::fileSementaraBaru('galat-import');
-            IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
+
+            try {
+                IOFactory::createWriter($spreadsheet, 'Xlsx')->save($path);
+            } catch (Throwable $exception) {
+                @unlink($path);
+
+                throw $exception;
+            }
         } finally {
             $spreadsheet->disconnectWorksheets();
         }
@@ -569,11 +580,69 @@ class ImportSiswaService
 
     /**
      * The folder for temporary files (config simas.folder_sementara), on the
-     * private disk of the application.
+     * private disk of the application. Refused unless it lies inside
+     * storage_path(), so the cleanup never deletes files anywhere else: an
+     * empty value, "/", a relative path, a path that leaves storage through
+     * "..", and (once the folder exists) a symlink pointing out of it.
+     *
+     * @throws RuntimeException
      */
     public static function folderSementara(): string
     {
-        return rtrim((string) config('simas.folder_sementara'), '\\/');
+        $nilai = (string) config('simas.folder_sementara');
+        $folder = rtrim($nilai, '\\/');
+        $storage = self::pathNormal(storage_path());
+        $normal = self::pathNormal($folder);
+        $diDalam = $storage !== null && $normal !== null
+            && ($normal === $storage || str_starts_with($normal, $storage.'/'));
+
+        if ($diDalam && is_dir($folder)) {
+            $asli = self::pathNormal((string) realpath($folder));
+            $storageAsli = self::pathNormal((string) realpath(storage_path()));
+            $diDalam = $asli !== null && $storageAsli !== null
+                && ($asli === $storageAsli || str_starts_with($asli, $storageAsli.'/'));
+        }
+
+        if (! $diDalam) {
+            throw new RuntimeException(sprintf('Folder file sementara (simas.folder_sementara) harus berada di dalam %s, bukan "%s".', storage_path(), $nilai));
+        }
+
+        return $folder;
+    }
+
+    /**
+     * An absolute path with forward slashes, "." and ".." resolved without
+     * touching the disk (".." at the root stays at the root), lower case on
+     * Windows; null when it is empty or not absolute.
+     */
+    private static function pathNormal(string $path): ?string
+    {
+        $path = str_replace('\\', '/', $path);
+        $akar = preg_match('#^([A-Za-z]:)?/#', $path, $cocok) === 1 ? rtrim($cocok[0], '/') : null;
+
+        if ($akar === null) {
+            return null;
+        }
+
+        $bagian = [];
+
+        foreach (explode('/', substr($path, strlen($cocok[0]))) as $segmen) {
+            if ($segmen === '' || $segmen === '.') {
+                continue;
+            }
+
+            if ($segmen === '..') {
+                array_pop($bagian);
+
+                continue;
+            }
+
+            $bagian[] = $segmen;
+        }
+
+        $hasil = $akar.'/'.implode('/', $bagian);
+
+        return PHP_OS_FAMILY === 'Windows' ? strtolower($hasil) : $hasil;
     }
 
     /**

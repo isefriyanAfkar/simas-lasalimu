@@ -14,6 +14,7 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Throwable;
 
 /**
  * The student import template for one target school year:
@@ -46,12 +47,20 @@ final class TemplateImportSiswa
 
     /**
      * The template written to a new temporary file, whose path is returned;
-     * the caller deletes it (a download with deleteFileAfterSend()).
+     * the caller deletes it (a download with deleteFileAfterSend()). A file
+     * that fails while being written is deleted at once.
      */
     public function fileSementara(TahunAjaran $tahunAjaran): string
     {
         $path = ImportSiswaService::fileSementaraBaru('template-import');
-        $this->simpan($tahunAjaran, $path);
+
+        try {
+            $this->simpan($tahunAjaran, $path);
+        } catch (Throwable $exception) {
+            @unlink($path);
+
+            throw $exception;
+        }
 
         return $path;
     }

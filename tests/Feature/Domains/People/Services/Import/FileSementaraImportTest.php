@@ -7,6 +7,7 @@ use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -88,6 +89,67 @@ class FileSementaraImportTest extends TestCase
 
         $this->assertFileDoesNotExist($lama);
         $this->assertFileExists($baru);
+    }
+
+    /**
+     * @return array<string, array{\Closure(): string}>
+     */
+    public static function folderDiLuarStorage(): array
+    {
+        return [
+            'kosong' => [fn (): string => ''],
+            'garis miring' => [fn (): string => '/'],
+            'garis miring terbalik' => [fn (): string => '\\'],
+            'folder temp sistem' => [fn (): string => sys_get_temp_dir()],
+            'di samping storage' => [fn (): string => base_path('tmp')],
+            'nama berawalan storage' => [fn (): string => storage_path().'-lain'],
+            'keluar lewat ..' => [fn (): string => storage_path('app/../../luar')],
+        ];
+    }
+
+    #[DataProvider('folderDiLuarStorage')]
+    public function test_a_folder_outside_storage_is_refused_before_anything_is_made(\Closure $folder): void
+    {
+        config(['simas.folder_sementara' => $folder()]);
+        $galat = null;
+
+        try {
+            ImportSiswaService::fileSementaraBaru('galat-import');
+        } catch (RuntimeException $exception) {
+            $galat = $exception->getMessage();
+        }
+
+        $this->assertSame(sprintf('Folder file sementara (simas.folder_sementara) harus berada di dalam %s, bukan "%s".', storage_path(), $folder()), $galat);
+    }
+
+    public function test_the_cleanup_refuses_a_folder_outside_storage_and_deletes_nothing(): void
+    {
+        Queue::fake();
+        $luar = base_path('tmp-uji-'.Str::lower(Str::random(8)));
+        File::ensureDirectoryExists($luar);
+        file_put_contents($lama = $luar.DIRECTORY_SEPARATOR.'lama.txt', 'x');
+        touch($lama, now()->subDays(3)->getTimestamp());
+        config(['simas.folder_sementara' => $luar]);
+        $galat = null;
+
+        try {
+            app(ImportSiswaService::class)->bersihkan();
+        } catch (RuntimeException $exception) {
+            $galat = $exception->getMessage();
+        } finally {
+            $masihAda = is_file($lama);
+            File::deleteDirectory($luar);
+        }
+
+        $this->assertSame(sprintf('Folder file sementara (simas.folder_sementara) harus berada di dalam %s, bukan "%s".', storage_path(), $luar), $galat);
+        $this->assertTrue($masihAda);
+    }
+
+    public function test_a_folder_inside_storage_written_with_either_slash_is_accepted(): void
+    {
+        config(['simas.folder_sementara' => storage_path('app/private/tmp')]);
+
+        $this->assertSame(storage_path('app/private/tmp'), ImportSiswaService::folderSementara());
     }
 
     public function test_the_cleanup_runs_when_the_folder_does_not_exist_yet(): void
