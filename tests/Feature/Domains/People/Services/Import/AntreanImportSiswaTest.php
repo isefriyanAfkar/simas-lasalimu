@@ -469,10 +469,10 @@ class AntreanImportSiswaTest extends TestCase
     }
 
     /**
-     * The files in the system temporary folder that the error file or the
-     * template could have made: their prefix, which tempnam() cuts to three
-     * letters on Windows ("gal", "tem"). Other programs keep writing there,
-     * so the rest is ignored.
+     * Every file in the temporary folder of the application
+     * (simas.folder_sementara, one per process when the tests run in
+     * parallel). The error file and the template must be made there and
+     * nowhere else.
      *
      * @return list<string>
      */
@@ -480,11 +480,9 @@ class AntreanImportSiswaTest extends TestCase
     {
         $file = [];
 
-        foreach (['gal', 'tem'] as $awalan) {
-            foreach (glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.$awalan.'*') ?: [] as $path) {
-                if (is_file($path) && ($asli = realpath($path)) !== false) {
-                    $file[] = $asli;
-                }
+        foreach (glob(ImportSiswaService::folderSementara().DIRECTORY_SEPARATOR.'*') ?: [] as $path) {
+            if (is_file($path) && ($asli = realpath($path)) !== false) {
+                $file[] = $asli;
             }
         }
 

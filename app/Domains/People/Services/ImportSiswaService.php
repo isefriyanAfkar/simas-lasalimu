@@ -406,15 +406,17 @@ class ImportSiswaService
      *   run);
      * - siap or bergalat, untouched for BATAS_TERLANTAR_JAM: dibatalkan;
      * - a file in FOLDER older than BATAS_TERLANTAR_JAM that no import still
-     *   uses: deleted.
+     *   uses: deleted;
+     * - a file in folderSementara() older than BATAS_TERLANTAR_JAM (a
+     *   download that never finished, so it was never deleted): deleted.
      * Each import is ended only while it still has the status it was found
      * with: one that moved on meanwhile is left alone and not counted.
      *
-     * @return array{macet: int, terlantar: int, file: int}
+     * @return array{macet: int, terlantar: int, file: int, sementara: int}
      */
     public function bersihkan(): array
     {
-        $hasil = ['macet' => 0, 'terlantar' => 0, 'file' => 0];
+        $hasil = ['macet' => 0, 'terlantar' => 0, 'file' => 0, 'sementara' => 0];
         $batasMacet = now()->subSeconds(self::BATAS_MACET_DETIK);
         $batasTerlantar = now()->subHours(self::BATAS_TERLANTAR_JAM);
 
@@ -450,6 +452,12 @@ class ImportSiswaService
             if (! in_array($file, $dipakai, true) && $disk->lastModified($file) < $batasTerlantar->getTimestamp() && $this->fileAda($file)) {
                 $disk->delete($file);
                 $hasil['file']++;
+            }
+        }
+
+        foreach (glob(self::folderSementara().DIRECTORY_SEPARATOR.'*') ?: [] as $file) {
+            if (is_file($file) && filemtime($file) < $batasTerlantar->getTimestamp() && @unlink($file)) {
+                $hasil['sementara']++;
             }
         }
 
@@ -529,19 +537,43 @@ class ImportSiswaService
     }
 
     /**
-     * A new empty file in the system temporary folder, for a download that
-     * deletes it once sent. tempnam() itself creates the file, so this is
-     * the one file made (no second one with an extension added).
+     * A new empty file in folderSementara(), for a download that deletes it
+     * once sent. The one place in the application that makes a temporary
+     * file. tempnam() itself creates the file, so this is the one file made
+     * (no second one with an extension added). tempnam() falls back to the
+     * system temporary folder when the folder is not writable; such a file
+     * is deleted and refused, because the error file can hold NIKs.
      */
     public static function fileSementaraBaru(string $awalan): string
     {
-        $path = tempnam(sys_get_temp_dir(), $awalan);
+        $folder = self::folderSementara();
+
+        if (! is_dir($folder) && ! @mkdir($folder, 0700, true) && ! is_dir($folder)) {
+            throw new RuntimeException('Tidak bisa membuat file sementara.');
+        }
+
+        $path = @tempnam($folder, $awalan);
 
         if ($path === false) {
             throw new RuntimeException('Tidak bisa membuat file sementara.');
         }
 
+        if (realpath(dirname($path)) !== realpath($folder)) {
+            @unlink($path);
+
+            throw new RuntimeException('Tidak bisa membuat file sementara.');
+        }
+
         return $path;
+    }
+
+    /**
+     * The folder for temporary files (config simas.folder_sementara), on the
+     * private disk of the application.
+     */
+    public static function folderSementara(): string
+    {
+        return rtrim((string) config('simas.folder_sementara'), '\\/');
     }
 
     /**

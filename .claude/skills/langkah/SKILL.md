@@ -130,10 +130,25 @@ setelah perubahan terakhir:
 
 ```
 vendor/bin/pint --dirty --format agent
-php artisan test --compact
+php artisan test --parallel --processes=4 --compact
 vendor/bin/pint --test --format agent
 vendor/bin/phpstan analyse --memory-limit=1G
 ```
+
+- **Test paralel** (paratest, 4 proses; angka 4 hasil pengukuran di laptop
+  pengembang: tercepat, dan proses lebih banyak tidak mempercepat lagi).
+  Setiap proses memakai database `simas_lasalimu_test_test_<n>` dan folder
+  sementara `storage/app/private/tmp_test_<n>` sendiri. Baris ringkasannya
+  berawalan `{"tool":"paratest",...}`.
+- **Test berurutan** (`php artisan test --compact`) tetap dipakai untuk:
+  - satu file atau `--filter` selama mengerjakan test-dulu;
+  - memeriksa ulang file yang gagal di lari paralel, untuk membedakan galat
+    sungguhan dari tabrakan antarproses;
+  - mencari test yang goyah: jalankan berurutan dan paralel beberapa kali,
+    lalu bandingkan.
+  Test yang gagal hanya di lari paralel adalah temuan, bukan alasan untuk
+  kembali ke lari berurutan: cari sumber daya yang dipakai bersama
+  (database, folder, cache, angka acak) dan pisahkan.
 
 - Jalankan keempat perintah itu **persis seperti tertulis**: tanpa pipa ke
   `head`, `tail`, `grep`, atau alat pemotong lain, dan tanpa membuang stderr

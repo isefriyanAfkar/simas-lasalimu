@@ -17,4 +17,21 @@ return [
 
     'nik_hmac_key' => env('NIK_HMAC_KEY'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Temporary files
+    |--------------------------------------------------------------------------
+    |
+    | Folder for the files made for a download and deleted once sent: the
+    | import error file (which can hold NIKs), the import template, the
+    | sample import. It is on the private disk of the application, never the
+    | system temporary folder, which other sites share on shared hosting.
+    | Created when first needed; simas:bersihkan-import deletes what is left
+    | after a day. Parallel tests give every process its own folder
+    | (AppServiceProvider).
+    |
+    */
+
+    'folder_sementara' => storage_path('app/private/tmp'),
+
 ];

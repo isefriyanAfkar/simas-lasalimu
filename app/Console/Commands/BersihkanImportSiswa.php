@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 /**
  * Scheduled every five minutes (routes/console.php). Ends imports whose job
  * died, gives up imports left alone for a day, and deletes leftover upload
- * files; see ImportSiswaService::bersihkan().
+ * and temporary files; see ImportSiswaService::bersihkan().
  */
 #[Signature('simas:bersihkan-import')]
 #[Description('Akhiri import siswa yang macet atau terlantar, dan hapus file unggahan sisa')]
@@ -21,10 +21,11 @@ class BersihkanImportSiswa extends Command
         $hasil = $service->bersihkan();
 
         $this->components->info(sprintf(
-            'Import macet ditandai gagal: %d. Import terlantar dibatalkan: %d. File sisa dihapus: %d.',
+            'Import macet ditandai gagal: %d. Import terlantar dibatalkan: %d. File sisa dihapus: %d. File sementara dihapus: %d.',
             $hasil['macet'],
             $hasil['terlantar'],
             $hasil['file'],
+            $hasil['sementara'],
         ));
 
         return self::SUCCESS;

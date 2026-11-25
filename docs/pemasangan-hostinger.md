@@ -163,7 +163,16 @@ menit. Penjadwal itu menjalankan:
   memulai worker kedua.
 - `simas:bersihkan-import`, setiap 5 menit: import yang macet ditandai gagal,
   import yang 24 jam tidak dilanjutkan dibatalkan, dan file unggahan sisa
-  dihapus.
+  serta file sementara yang lebih tua dari 1 hari dihapus.
+
+**File sementara** ada di `storage/app/private/tmp`, bukan di folder temp
+sistem. Yang disimpan di sana: file galat import yang diunduh operator
+(bisa berisi NIK), template import, dan file contoh import. Folder temp
+sistem dipakai bersama situs lain di hosting ini, jadi tidak dipakai.
+Folder `tmp` dibuat otomatis saat pertama dibutuhkan dan tidak masuk git.
+Setiap file dihapus begitu selesai diunduh. Unduhan yang terputus
+meninggalkan file, dan file seperti itu dihapus oleh `simas:bersihkan-import`
+setelah 1 hari.
 
 **a. Isi `.env`.** Tambahkan, lalu jalankan `optimize`:
 
